@@ -1208,13 +1208,13 @@ const DesaTaggingDashboard = () => {
               />
             </label>
 
-            <button
+            {/* <button
               onClick={() => generateTestData(5000)}
               className="px-3 py-2 text-gray-800 transition bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200"
               title="Generate 5000 titik (test)"
             >
               Generate 5k titik
-            </button>
+            </button> */}
 
             <button
               onClick={clearData}
@@ -1224,7 +1224,7 @@ const DesaTaggingDashboard = () => {
               Clear
             </button>
 
-            <div className="ml-2 text-xs text-gray-500">Atau coba URL publik:</div>
+            {/* <div className="ml-2 text-xs text-gray-500">Atau coba URL publik:</div>
             <div className="flex flex-col ml-2 space-y-1">
               <button onClick={async () => {
                 try { setGeoLoading(true); const gj = await fetch('https://raw.githubusercontent.com/superpikar/indonesia-geojson/master/kabupaten/jawa-timur/nganjuk.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 1'); } finally { setGeoLoading(false); }
@@ -1238,7 +1238,7 @@ const DesaTaggingDashboard = () => {
               <button onClick={async () => {
                 try { setGeoLoading(true); const gj = await fetch('https://cdn.jsdelivr.net/gh/superpikar/indonesia-geojson@master/kabupaten/jawa-timur/nganjuk.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 4'); } finally { setGeoLoading(false); }
               }} className="px-2 py-1 text-xs bg-white border rounded">Use jsdelivr superpikar</button>
-            </div>
+            </div> */}
 
             {loading && (
               <div className="flex items-center space-x-2">
