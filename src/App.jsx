@@ -322,22 +322,22 @@ const CanvasChoroplethMap = ({ points, geojson, onFetchGeoJSON, geoLoading }) =>
   const resetZoom = () => { zoomRef.current = 1; setZoom(1); };
 
   return (
-    <div ref={wrapperRef} style={{ height: 450, width: '100%' }} className="bg-white relative">
+    <div ref={wrapperRef} style={{ height: 450, width: '100%' }} className="relative bg-white">
       <canvas ref={canvasRef} />
 
-      <div className="absolute top-3 right-3 flex flex-col items-end space-y-2">
+      <div className="absolute flex flex-col items-end space-y-2 top-3 right-3">
         <div className="flex space-x-2">
-          <button onClick={zoomIn} className="px-2 py-1 bg-white text-sm rounded shadow border">+</button>
-          <button onClick={zoomOut} className="px-2 py-1 bg-white text-sm rounded shadow border">−</button>
-          <button onClick={resetZoom} className="px-2 py-1 bg-white text-sm rounded shadow border">Reset</button>
+          <button onClick={zoomIn} className="px-2 py-1 text-sm bg-white border rounded shadow">+</button>
+          <button onClick={zoomOut} className="px-2 py-1 text-sm bg-white border rounded shadow">−</button>
+          <button onClick={resetZoom} className="px-2 py-1 text-sm bg-white border rounded shadow">Reset</button>
         </div>
         <div className="flex space-x-2">
-          <button onClick={() => setShowLabels(s => !s)} className="px-2 py-1 bg-white text-sm rounded shadow border">{showLabels ? 'Hide Labels' : 'Show Labels'}</button>
-          <button onClick={onFetchGeoJSON} disabled={geoLoading} className="px-3 py-1 bg-white text-sm rounded shadow border">
+          <button onClick={() => setShowLabels(s => !s)} className="px-2 py-1 text-sm bg-white border rounded shadow">{showLabels ? 'Hide Labels' : 'Show Labels'}</button>
+          <button onClick={onFetchGeoJSON} disabled={geoLoading} className="px-3 py-1 text-sm bg-white border rounded shadow">
             {geoLoading ? 'Memuat...' : (geojson ? 'Segarkan Batas' : 'Muat Batas Kecamatan')}
           </button>
         </div>
-        <div className="text-xs text-gray-600 bg-white px-2 py-1 rounded shadow border">Zoom: {zoom}×</div>
+        <div className="px-2 py-1 text-xs text-gray-600 bg-white border rounded shadow">Zoom: {zoom}×</div>
       </div>
     </div>
   );
@@ -537,65 +537,37 @@ const DesaTaggingDashboard = () => {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
-        // also read as array-of-arrays to get column-based data
-        const aoa = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        // Build desa -> kecamatan mapping using object keys (case-insensitive), avoid picking email columns
         const desaKecMap = {};
-        if (aoa && aoa.length > 1) {
-          // assume first row is header
-          const header = aoa[0] || [];
-          // find desa column index by header heuristics
-          const desaCandidates = ['desa','nama desa','nama_desa','nm_desa','name','nama'];
-          let desaIdx = null;
-          for (let i = 0; i < header.length; i++) {
-            const h = (header[i] || '').toString().toLowerCase();
-            if (desaCandidates.includes(h)) { desaIdx = i; break; }
-          }
-
-          // find kecamatan column index by header heuristics; fallback to column 10 if header not present
-          const kecCandidates = ['kecamatan','nama kecamatan','kec','nm_kecamatan','nama_kec'];
-          let kecIdx = null;
-          for (let i = 0; i < header.length; i++) {
-            const h = (header[i] || '').toString().toLowerCase();
-            if (kecCandidates.includes(h)) { kecIdx = i; break; }
-          }
-
-          // if kecIdx not found by header, attempt to pick a column that looks like kecamatan (not an email column)
-          if (kecIdx == null) {
-            // scan first few rows and columns to find a column with low email frequency and non-empty strings
-            const sampleRows = Math.min(50, aoa.length - 1);
-            const colScores = new Array(header.length).fill(0);
-            for (let c = 0; c < header.length; c++) {
-              let nonEmpty = 0, emailCount = 0;
-              for (let r = 1; r <= sampleRows; r++) {
-                const v = (aoa[r] && aoa[r][c] != null) ? String(aoa[r][c]).trim() : '';
-                if (!v) continue;
-                nonEmpty++;
-                if (v.indexOf('@') !== -1) emailCount++;
-              }
-              // score: prefer columns with many non-empty and few emails
-              colScores[c] = nonEmpty - emailCount * 2;
+        if (jsonData && jsonData.length) {
+          const desaCandidates = ['desa','nama desa','nama_desa','nm_desa','name','nama','nama desa (desa/kel)'];
+          const kecCandidates = ['kecamatan','nama kecamatan','kec','nm_kecamatan','nama_kec','nama kec','kecamatan/desa'];
+          const findKey = (obj, candidates) => {
+            const keys = Object.keys(obj || {});
+            const lowerMap = keys.reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
+            for (const cand of candidates) {
+              const k = lowerMap[cand.toLowerCase()];
+              if (k) return k;
             }
-            // pick highest score column if positive
-            let best = -Infinity, bestIdx = null;
-            for (let c = 0; c < colScores.length; c++) {
-              if (colScores[c] > best) { best = colScores[c]; bestIdx = c; }
-            }
-            if (best > 0) kecIdx = bestIdx;
-          }
-
-          // as last resort, try index 10
-          if (kecIdx == null) kecIdx = 10;
-
-          // iterate rows and extract kecamatan using detected kecIdx
-          for (let r = 1; r < Math.min(aoa.length, 2000); r++) {
-            const row = aoa[r];
-            if (!row) continue;
-            const kec = row[kecIdx];
-            const desaNameRaw = desaIdx != null ? (row[desaIdx] || '') : (row[0] || '');
-            const desaName = desaNameRaw.toString().trim();
+            return null;
+          };
+          const looksLikeKecamatan = (v) => {
+            if (v == null) return false;
+            const s = String(v).trim();
+            if (!s) return false;
+            if (s.includes('@')) return false;
+            return /[A-Za-z]/.test(s);
+          };
+          for (const row of jsonData) {
+            const desaKey = findKey(row, desaCandidates);
+            const kecKey = findKey(row, kecCandidates);
+            const desaNameRaw = desaKey ? row[desaKey] : (row['Nama Desa'] || row['DESA'] || row['Desa'] || row['desa'] || row['nama_desa'] || row['nama'] || row['NAMA']);
+            const kecRaw = kecKey ? row[kecKey] : (row['Kecamatan'] || row['KECAMATAN'] || row['kecamatan'] || row['Nama Kecamatan'] || row['nama kecamatan'] || row['Kec'] || row['kec']);
+            const desaName = desaNameRaw ? String(desaNameRaw).trim() : '';
+            const kec = kecRaw != null ? String(kecRaw).trim() : '';
             if (!desaName) continue;
             const key = normalizeDesaName(desaName);
-            desaKecMap[key] = (kec || '').toString().trim();
+            if (kec && looksLikeKecamatan(kec)) desaKecMap[key] = kec;
           }
         }
         // debug: log detected desa/kecamatan mapping sample
@@ -764,7 +736,8 @@ const DesaTaggingDashboard = () => {
         };
 
         jsonData.forEach((row, idx) => {
-          const desa = row.Desa?.toString().trim();
+          const desaVal = (row.Desa || row.desa || row.nama_desa || row.nama || row.NAMA || row.nm_desa || row.name || row['Nama Desa']);
+          const desa = desaVal != null ? desaVal.toString().trim() : '';
           if (desa && desa !== '') {
             desaCount[desa] = (desaCount[desa] || 0) + 1;
           }
@@ -809,6 +782,40 @@ const DesaTaggingDashboard = () => {
           count,
           percentage: ((count / jsonData.length) * 100).toFixed(2)
         }));
+
+        // Update master desa list dari file upload
+        try {
+          const names = new Set();
+          for (const row of jsonData) {
+            const name = (row.Desa || row.desa || row.nama_desa || row.nama || row.NAMA || row.nm_desa || row.name || row['Nama Desa']);
+            if (name) names.add(String(name).trim());
+          }
+          if (names.size) setMasterDesaList(Array.from(names).sort());
+        } catch (e) {}
+
+        // Bangun peta desa->kecamatan dari file upload dan gabungkan
+        try {
+          const desaKecNew = {};
+          const kecCandidates = ['kecamatan','nama kecamatan','kec','nm_kecamatan','nama_kec','Kecamatan','KECAMATAN','Nama Kecamatan'];
+          const findKey2 = (obj, candidates) => {
+            const keys = Object.keys(obj || {});
+            const lowerMap = keys.reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
+            for (const cand of candidates) { const k = lowerMap[cand.toLowerCase()]; if (k) return k; }
+            return null;
+          };
+          for (const row of jsonData) {
+            const desaNameRaw = (row.Desa || row.desa || row.nama_desa || row.nama || row.NAMA || row.nm_desa || row.name || row['Nama Desa']);
+            const kecKey = findKey2(row, kecCandidates);
+            const kecRaw = kecKey ? row[kecKey] : undefined;
+            const desaName = desaNameRaw ? String(desaNameRaw).trim() : '';
+            const kec = kecRaw != null ? String(kecRaw).trim() : '';
+            if (!desaName || !kec) continue;
+            if (kec.includes('@')) continue;
+            const key = normalizeDesaName(desaName);
+            desaKecNew[key] = kec;
+          }
+          if (Object.keys(desaKecNew).length) setDesaToKecMap(prev => ({ ...prev, ...desaKecNew }));
+        } catch (e) {}
 
         setOriginalData(processedData);
         sortData(processedData, 'desc');
@@ -1085,17 +1092,17 @@ const DesaTaggingDashboard = () => {
   const ProgressBar = ({ value, max, label, count }) => {
     const percentage = (value / max) * 100;
     return (
-      <div className="mb-4 p-4 bg-white rounded-lg shadow border border-gray-200">
-        <div className="flex justify-between items-center mb-2">
-          <span className="text-sm font-medium text-gray-700 truncate mr-2">{label}</span>
+      <div className="p-4 mb-4 bg-white border border-gray-200 rounded-lg shadow">
+        <div className="flex items-center justify-between mb-2">
+          <span className="mr-2 text-sm font-medium text-gray-700 truncate">{label}</span>
           <div className="flex items-center space-x-2">
             <span className="text-sm font-bold text-blue-600">{count.toLocaleString()}</span>
             <span className="text-xs text-gray-500">({((value / originalData.reduce((sum, item) => sum + item.count, 0)) * 100).toFixed(1)}%)</span>
           </div>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-3">
+        <div className="w-full h-3 bg-gray-200 rounded-full">
           <div
-            className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-300 ease-out"
+            className="h-3 transition-all duration-300 ease-out rounded-full bg-gradient-to-r from-blue-500 to-blue-600"
             style={{ width: `${percentage}%` }}
           ></div>
         </div>
@@ -1112,35 +1119,35 @@ const DesaTaggingDashboard = () => {
   const totalData = originalData.reduce((sum, item) => sum + item.count, 0);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen p-6 bg-gray-50">
+      <div className="mx-auto max-w-7xl">
         {/* Header */}
         <div className="mb-6">
           <div className="relative overflow-hidden rounded-lg">
             <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 via-sky-600 to-emerald-500 opacity-95"></div>
-            <div className="relative p-8 sm:p-12 text-white">
+            <div className="relative p-8 text-white sm:p-12">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-3">
-                  <img src="/logo-bps-nganjuk-transparan.png" alt="logo BPS Nganjuk" className="h-10 w-10 rounded-md bg-white/20 p-1" />
+                  <img src="/logo-bps-nganjuk-transparan.png" alt="logo BPS Nganjuk" className="w-10 h-10 p-1 rounded-md bg-white/20" />
                   <div>
-                    <div className="text-sm uppercase tracking-wider font-semibold">BPS Kabupaten Nganjuk</div>
+                    <div className="text-sm font-semibold tracking-wider uppercase">BPS Kabupaten Nganjuk</div>
                     <div className="text-xs opacity-80">Dashboard Resmi</div>
                   </div>
                 </div>
-                <div className="text-sm bg-white/20 px-3 py-1 rounded-full">{new Date().toLocaleDateString()}</div>
+                <div className="px-3 py-1 text-sm rounded-full bg-white/20">{new Date().toLocaleDateString()}</div>
               </div>
 
-              <h1 className="text-4xl sm:text-5xl font-extrabold leading-tight">Dashboard Sebaran Data Tagging per Desa</h1>
-              <p className="mt-3 max-w-2xl text-lg opacity-90">Analisis distribusi data tagging dari <span className="font-semibold">{totalData.toLocaleString()}</span> total entri</p>
+              <h1 className="text-4xl font-extrabold leading-tight sm:text-5xl">Dashboard Sebaran Data Tagging per Desa</h1>
+              <p className="max-w-2xl mt-3 text-lg opacity-90">Analisis distribusi data tagging dari <span className="font-semibold">{totalData.toLocaleString()}</span> total entri</p>
 
-              <div className="mt-6 flex space-x-3">
-                <label className="flex items-center space-x-2 px-4 py-2 bg-white text-indigo-700 rounded-lg hover:brightness-90 cursor-pointer transition">
+              <div className="flex mt-6 space-x-3">
+                <label className="flex items-center px-4 py-2 space-x-2 text-indigo-700 transition bg-white rounded-lg cursor-pointer hover:brightness-90">
                   <Upload size={16} />
                   <span className="font-medium">Pilih File Excel (.xlsx)</span>
                   <input type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="hidden" />
                 </label>
                 {data.length > 0 && (
-                  <button onClick={exportToExcel} className="flex items-center space-x-2 px-4 py-2 bg-white/20 border border-white/30 text-white rounded-lg hover:bg-white/10 transition">
+                  <button onClick={exportToExcel} className="flex items-center px-4 py-2 space-x-2 text-white transition border rounded-lg bg-white/20 border-white/30 hover:bg-white/10">
                     <Download size={16} />
                     <span>Export Excel</span>
                   </button>
@@ -1151,13 +1158,13 @@ const DesaTaggingDashboard = () => {
         </div>
 
         {/* Upload Section */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <div className="p-6 mb-6 bg-white border border-gray-200 rounded-lg shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold text-gray-800">Upload Data Excel</h2>
             {data.length > 0 && (
               <button
                 onClick={exportToExcel}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                className="flex items-center px-4 py-2 space-x-2 text-white transition-colors bg-green-600 rounded-lg hover:bg-green-700"
               >
                 <Download size={16} />
                 <span>Export Excel</span>
@@ -1166,7 +1173,7 @@ const DesaTaggingDashboard = () => {
           </div>
           
           <div className="flex items-center space-x-4">
-            <label className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
+            <label className="flex items-center px-4 py-2 space-x-2 text-white transition-colors bg-blue-600 rounded-lg cursor-pointer hover:bg-blue-700">
               <Upload size={16} />
               <span>Pilih File Excel (.xlsx)</span>
               <input
@@ -1177,7 +1184,7 @@ const DesaTaggingDashboard = () => {
               />
             </label>
 
-            <label className="flex items-center space-x-2 px-4 py-2 bg-white text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors">
+            <label className="flex items-center px-4 py-2 space-x-2 text-gray-700 transition-colors bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
               <svg width="16" height="16" className="lucide lucide-file-text"><path d="M"/></svg>
               <span>Unggah GeoJSON</span>
               <input
@@ -1203,7 +1210,7 @@ const DesaTaggingDashboard = () => {
 
             <button
               onClick={() => generateTestData(5000)}
-              className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg border border-gray-200 hover:bg-gray-200 transition"
+              className="px-3 py-2 text-gray-800 transition bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200"
               title="Generate 5000 titik (test)"
             >
               Generate 5k titik
@@ -1211,7 +1218,7 @@ const DesaTaggingDashboard = () => {
 
             <button
               onClick={clearData}
-              className="px-3 py-2 bg-red-50 text-red-600 rounded-lg border border-red-100 hover:bg-red-100 transition"
+              className="px-3 py-2 text-red-600 transition border border-red-100 rounded-lg bg-red-50 hover:bg-red-100"
               title="Clear semua data"
             >
               Clear
@@ -1221,21 +1228,21 @@ const DesaTaggingDashboard = () => {
             <div className="flex flex-col ml-2 space-y-1">
               <button onClick={async () => {
                 try { setGeoLoading(true); const gj = await fetch('https://raw.githubusercontent.com/superpikar/indonesia-geojson/master/kabupaten/jawa-timur/nganjuk.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 1'); } finally { setGeoLoading(false); }
-              }} className="px-2 py-1 bg-white rounded border text-xs">Use raw.githubusercontent.com/superpikar</button>
+              }} className="px-2 py-1 text-xs bg-white border rounded">Use raw.githubusercontent.com/superpikar</button>
               <button onClick={async () => {
                 try { setGeoLoading(true); const gj = await fetch('https://raw.githubusercontent.com/thetrisatria/geojson-indonesia/master/regencies/nganjuk.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 2'); } finally { setGeoLoading(false); }
-              }} className="px-2 py-1 bg-white rounded border text-xs">Use raw.githubusercontent.com/thetrisatria</button>
+              }} className="px-2 py-1 text-xs bg-white border rounded">Use raw.githubusercontent.com/thetrisatria</button>
               <button onClick={async () => {
                 try { setGeoLoading(true); const gj = await fetch('https://raw.githubusercontent.com/ans-4175/peta-indonesia-geojson/master/kabupaten/35/3518.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 3'); } finally { setGeoLoading(false); }
-              }} className="px-2 py-1 bg-white rounded border text-xs">Use raw.githubusercontent.com/ans-4175</button>
+              }} className="px-2 py-1 text-xs bg-white border rounded">Use raw.githubusercontent.com/ans-4175</button>
               <button onClick={async () => {
                 try { setGeoLoading(true); const gj = await fetch('https://cdn.jsdelivr.net/gh/superpikar/indonesia-geojson@master/kabupaten/jawa-timur/nganjuk.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 4'); } finally { setGeoLoading(false); }
-              }} className="px-2 py-1 bg-white rounded border text-xs">Use jsdelivr superpikar</button>
+              }} className="px-2 py-1 text-xs bg-white border rounded">Use jsdelivr superpikar</button>
             </div>
 
             {loading && (
               <div className="flex items-center space-x-2">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                <div className="w-5 h-5 border-b-2 border-blue-600 rounded-full animate-spin"></div>
                 <span className="text-gray-600">Memproses data...</span>
               </div>
             )}
@@ -1245,8 +1252,8 @@ const DesaTaggingDashboard = () => {
         {data.length > 0 && (
           <>
             {/* Controls */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
+            <div className="p-6 mb-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+              <div className="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0">
                 <div className="flex items-center space-x-4">
                   <button
                     onClick={() => handleSortChange(sortOrder === 'desc' ? 'asc' : 'desc')}
@@ -1275,32 +1282,32 @@ const DesaTaggingDashboard = () => {
             </div>
 
             {/* Summary Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Desa</h3>
+            <div className="grid grid-cols-1 gap-6 mb-6 md:grid-cols-4">
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Total Desa</h3>
                 <p className="text-2xl font-bold text-blue-600">{data.length}</p>
               </div>
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Entri</h3>
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Total Entri</h3>
                 <p className="text-2xl font-bold text-green-600">{totalData.toLocaleString()}</p>
               </div>
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Rata-rata per Desa</h3>
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Rata-rata per Desa</h3>
                 <p className="text-2xl font-bold text-purple-600">{Math.round(totalData / data.length)}</p>
               </div>
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Tertinggi</h3>
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Tertinggi</h3>
                 <p className="text-2xl font-bold text-red-600">{maxCount.toLocaleString()}</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               {/* Progress Bars */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <h2 className="mb-4 text-xl font-semibold text-gray-800">
                   Progress per Desa ({filteredData.length} dari {data.length} desa)
                 </h2>
-                <div className="max-h-96 overflow-y-auto">
+                <div className="overflow-y-auto max-h-96">
                   {filteredData.map((item, index) => (
                     <ProgressBar
                       key={item.desa}
@@ -1314,12 +1321,12 @@ const DesaTaggingDashboard = () => {
               </div>
 
               {/* Chart */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold text-gray-800">Top 20 Desa</h2>
                   <div className="flex items-center space-x-2">
-                    <button onClick={() => setChartExpanded(true)} className="px-3 py-1 bg-white text-sm rounded shadow border">Expand Chart</button>
-                    <button onClick={exportToExcel} className="px-3 py-1 bg-green-600 text-white rounded shadow">Export</button>
+                    <button onClick={() => setChartExpanded(true)} className="px-3 py-1 text-sm bg-white border rounded shadow">Expand Chart</button>
+                    <button onClick={exportToExcel} className="px-3 py-1 text-white bg-green-600 rounded shadow">Export</button>
                   </div>
                 </div>
                 <ResponsiveContainer width="100%" height={400}>
@@ -1343,15 +1350,15 @@ const DesaTaggingDashboard = () => {
               </div>
 
               {/* Map */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="text-xl font-semibold text-gray-800">Sebaran Titik Desa (ringan)</h2>
                   <div className="flex items-center space-x-3">
                     <div className="text-sm text-gray-600">{filteredPoints.length.toLocaleString()} titik</div>
-                    <button onClick={() => setMapExpanded(true)} className="px-3 py-1 bg-white text-sm rounded shadow border">Expand Map</button>
+                    <button onClick={() => setMapExpanded(true)} className="px-3 py-1 text-sm bg-white border rounded shadow">Expand Map</button>
                   </div>
                 </div>
-                <div className="rounded-lg overflow-hidden border border-gray-100">
+                <div className="overflow-hidden border border-gray-100 rounded-lg">
                   <CanvasChoroplethMap points={filteredPoints} geojson={geojson} onFetchGeoJSON={async () => {
                     try {
                       setGeoLoading(true);
@@ -1373,13 +1380,13 @@ const DesaTaggingDashboard = () => {
             {mapExpanded && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                 <div className="bg-white w-[90vw] h-[90vh] rounded shadow-lg overflow-hidden">
-                  <div className="p-3 flex justify-between items-center border-b">
+                  <div className="flex items-center justify-between p-3 border-b">
                     <div className="font-semibold">Peta Sebaran (Expanded)</div>
                     <div className="space-x-2">
-                      <button onClick={() => setMapExpanded(false)} className="px-3 py-1 bg-white rounded border">Close</button>
+                      <button onClick={() => setMapExpanded(false)} className="px-3 py-1 bg-white border rounded">Close</button>
                     </div>
                   </div>
-                  <div className="p-4 h-full">
+                  <div className="h-full p-4">
                     <CanvasChoroplethMap points={filteredPoints} geojson={geojson} onFetchGeoJSON={async () => {
                       try { setGeoLoading(true); const gj = await fetchKecamatanGeoJSON(); setGeojson(gj); } catch (err) { console.error(err); alert('Gagal memuat GeoJSON'); } finally { setGeoLoading(false); }
                     }} geoLoading={geoLoading} />
@@ -1391,13 +1398,13 @@ const DesaTaggingDashboard = () => {
             {chartExpanded && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                 <div className="bg-white w-[90vw] h-[90vh] rounded shadow-lg overflow-hidden">
-                  <div className="p-3 flex justify-between items-center border-b">
+                  <div className="flex items-center justify-between p-3 border-b">
                     <div className="font-semibold">Chart Top Desa (Expanded)</div>
                     <div className="space-x-2">
-                      <button onClick={() => setChartExpanded(false)} className="px-3 py-1 bg-white rounded border">Close</button>
+                      <button onClick={() => setChartExpanded(false)} className="px-3 py-1 bg-white border rounded">Close</button>
                     </div>
                   </div>
-                  <div className="p-4 h-full">
+                  <div className="h-full p-4">
                     <div style={{ height: '100%', width: '100%' }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={filteredData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
@@ -1418,9 +1425,9 @@ const DesaTaggingDashboard = () => {
         )}
 
         {data.length === 0 && !loading && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
-            <Upload size={48} className="mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Belum ada data yang dimuat</h3>
+          <div className="p-12 text-center bg-white border border-gray-200 rounded-lg shadow-sm">
+            <Upload size={48} className="mx-auto mb-4 text-gray-400" />
+            <h3 className="mb-2 text-lg font-medium text-gray-900">Belum ada data yang dimuat</h3>
             <p className="text-gray-600">Upload file Excel Anda untuk melihat dashboard sebaran data tagging per desa</p>
           </div>
         )}
