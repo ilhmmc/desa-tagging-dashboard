@@ -1,14 +1,734 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Upload, Download, SortAsc, SortDesc, Filter } from 'lucide-react';
 
+// Canvas choropleth + dots map with zoom, pan and labels
+const CanvasChoroplethMap = ({ points, geojson, onFetchGeoJSON, geoLoading }) => {
+  const wrapperRef = useRef(null);
+  const canvasRef = useRef(null);
+  const sizeRef = useRef({ w: 0, h: 0 });
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  const [showLabels, setShowLabels] = useState(true);
+  const minZoom = 0.5, maxZoom = 8;
+  const panRef = useRef({ x: 0, y: 0 });
+  const draggingRef = useRef(false);
+  const lastPointerRef = useRef(null);
+
+  // Calculate bounds from geojson and points
+  const bounds = useMemo(() => {
+    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+    const extend = (lat, lon) => {
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+    };
+    if (geojson && geojson.features) {
+      for (const f of geojson.features) {
+        const coords = f.geometry && f.geometry.coordinates;
+        const iter = (arr) => {
+          if (!arr) return;
+          if (typeof arr[0] === 'number') {
+            // [lon, lat]
+            extend(arr[1], arr[0]);
+          } else {
+            for (const a of arr) iter(a);
+          }
+        };
+        iter(coords);
+      }
+    }
+    for (const p of points || []) extend(p.lat, p.lon);
+    if (!isFinite(minLat)) { minLat = -7.8; maxLat = -7.2; minLon = 111.6; maxLon = 112.2; }
+    if (minLat === maxLat) { minLat -= 0.05; maxLat += 0.05; }
+    if (minLon === maxLon) { minLon -= 0.05; maxLon += 0.05; }
+    return { minLat, maxLat, minLon, maxLon };
+  }, [geojson, points]);
+
+  // compute centroids for labels
+  const centroids = useMemo(() => {
+    if (!geojson || !geojson.features) return [];
+    const res = [];
+    for (const f of geojson.features) {
+      const props = f.properties || {};
+      const name = props.name || props.NAME || props.nama || props.KAB || props.kecamatan || props.kec || props.NAME_2 || '';
+      let coords = [];
+      if (!f.geometry) { res.push({ lon: 0, lat: 0, name }); continue; }
+      if (f.geometry.type === 'Polygon') coords = f.geometry.coordinates[0];
+      else if (f.geometry.type === 'MultiPolygon') coords = (f.geometry.coordinates[0] && f.geometry.coordinates[0][0]) || [];
+      if (!coords || coords.length === 0) { res.push({ lon: 0, lat: 0, name }); continue; }
+      let sumX = 0, sumY = 0, cnt = 0;
+      for (const c of coords) { sumX += c[0]; sumY += c[1]; cnt++; }
+      const lon = sumX / cnt; const lat = sumY / cnt;
+      res.push({ lon, lat, name });
+    }
+    return res;
+  }, [geojson]);
+
+  // Resize observer
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    const canvas = canvasRef.current;
+    if (!wrapper || !canvas) return;
+    const ro = new ResizeObserver(() => {
+      const rect = wrapper.getBoundingClientRect();
+      sizeRef.current = { w: rect.width, h: rect.height };
+      canvas.width = Math.floor(rect.width * window.devicePixelRatio);
+      canvas.height = Math.floor(rect.height * window.devicePixelRatio);
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      draw();
+    });
+    ro.observe(wrapper);
+
+    // pointer handlers for pan
+    const onPointerDown = (e) => {
+      draggingRef.current = true;
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      wrapper.setPointerCapture && wrapper.setPointerCapture(e.pointerId);
+      wrapper.style.cursor = 'grabbing';
+    };
+    const onPointerMove = (e) => {
+      if (!draggingRef.current) return;
+      const last = lastPointerRef.current;
+      if (!last) return;
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      panRef.current.x += dx;
+      panRef.current.y += dy;
+      draw();
+    };
+    const onPointerUp = (e) => {
+      draggingRef.current = false;
+      lastPointerRef.current = null;
+      wrapper.releasePointerCapture && wrapper.releasePointerCapture(e.pointerId);
+      wrapper.style.cursor = 'default';
+    };
+
+    const onWheel = (e) => {
+      e.preventDefault();
+      const rect = wrapper.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      const oldZ = zoomRef.current || zoom;
+      const newZoom = Math.max(minZoom, Math.min(maxZoom, +(oldZ * factor).toFixed(3)));
+      // adjust pan to keep focus at mouse position
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      panRef.current.x = panRef.current.x - (mouseX - cx) * (newZoom / oldZ - 1);
+      panRef.current.y = panRef.current.y - (mouseY - cy) * (newZoom / oldZ - 1);
+      zoomRef.current = newZoom;
+      setZoom(newZoom);
+      draw();
+    };
+
+    wrapper.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    wrapper.addEventListener('wheel', onWheel, { passive: false });
+
+    return () => {
+      ro.disconnect();
+      wrapper.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      wrapper.removeEventListener('wheel', onWheel);
+    };
+  }, [geojson, points, zoom, showLabels]);
+
+  const project = (lat, lon, w, h) => {
+    const pad = 12;
+    const { minLat, maxLat, minLon, maxLon } = bounds;
+    const x = pad + ((lon - minLon) / (maxLon - minLon)) * Math.max(1, w - pad * 2);
+    const y = pad + ((maxLat - lat) / (maxLat - minLat)) * Math.max(1, h - pad * 2);
+    // apply zoom about canvas center
+    const cx = (w) / 2;
+    const cy = (h) / 2;
+    const z = zoomRef.current || zoom;
+    const zx = cx + (x - cx) * z + (panRef.current.x || 0);
+    const zy = cy + (y - cy) * z + (panRef.current.y || 0);
+    return [zx, zy];
+  };
+
+  // Ray-casting algorithm for point-in-polygon
+  const pointInRing = (x, y, ring) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi + 0.0) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  };
+
+  const pointInPolygon = (lon, lat, polygon) => {
+    if (!polygon || polygon.length === 0) return false;
+    if (pointInRing(lon, lat, polygon[0])) {
+      for (let i = 1; i < polygon.length; i++) {
+        if (pointInRing(lon, lat, polygon[i])) return false;
+      }
+      return true;
+    }
+    return false;
+  };
+
+  const computeCounts = (geojson, pts) => {
+    const counts = new Array((geojson?.features?.length) || 0).fill(0);
+    if (!geojson || !geojson.features || !pts) return counts;
+    for (const p of pts) {
+      for (let i = 0; i < geojson.features.length; i++) {
+        const f = geojson.features[i];
+        if (!f.geometry) continue;
+        const geom = f.geometry;
+        if (geom.type === 'Polygon') {
+          if (pointInPolygon(p.lon, p.lat, geom.coordinates)) { counts[i]++; break; }
+        } else if (geom.type === 'MultiPolygon') {
+          for (const poly of geom.coordinates) {
+            if (pointInPolygon(p.lon, p.lat, poly)) { counts[i]++; break; }
+          }
+        }
+      }
+    }
+    return counts;
+  };
+
+  const colorFor = (value, max) => {
+    if (max === 0) return '#F3F4F6';
+    const t = Math.min(1, value / max);
+    const r1 = 254, g1 = 243, b1 = 199;
+    const r2 = 220, g2 = 38, b2 = 38;
+    const r = Math.round(r1 + (r2 - r1) * t);
+    const g = Math.round(g1 + (g2 - g1) * t);
+    const b = Math.round(b1 + (b2 - b1) * t);
+    return `rgb(${r},${g},${b})`;
+  };
+
+  const draw = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+
+    // draw choropleth polygons first
+    const counts = computeCounts(geojson, points);
+    const maxCount = counts.length ? Math.max(...counts) : 0;
+
+    if (geojson && geojson.features) {
+      for (let i = 0; i < geojson.features.length; i++) {
+        const f = geojson.features[i];
+        const geom = f.geometry;
+        const fill = colorFor(counts[i], maxCount);
+        ctx.save();
+        ctx.scale(dpr, dpr);
+        ctx.beginPath();
+        const drawRing = (ring) => {
+          for (let j = 0; j < ring.length; j++) {
+            const [lon, lat] = ring[j];
+            const [x, y] = project(lat, lon, w / dpr, h / dpr);
+            if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+        };
+        if (geom.type === 'Polygon') {
+          for (let r = 0; r < geom.coordinates.length; r++) drawRing(geom.coordinates[r]);
+        } else if (geom.type === 'MultiPolygon') {
+          for (const poly of geom.coordinates) {
+            for (let r = 0; r < poly.length; r++) drawRing(poly[r]);
+          }
+        }
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.globalAlpha = 0.8;
+        ctx.fill();
+        ctx.strokeStyle = '#9CA3AF';
+        ctx.globalAlpha = 0.6;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // draw points
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    const radius = 2.2;
+    for (const p of points || []) {
+      const [x, y] = project(p.lat, p.lon, w / dpr, h / dpr);
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(17,24,39,0.85)';
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // labels
+    if (showLabels && centroids && centroids.length) {
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#111827';
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 3;
+      for (const c of centroids) {
+        if (!c.name) continue;
+        const [x, y] = project(c.lat, c.lon, w / dpr, h / dpr);
+        // only draw labels that are within canvas bounds
+        if (x < 0 || y < 0 || x > w / dpr || y > h / dpr) continue;
+        ctx.strokeText(c.name, x + 4, y);
+        ctx.fillText(c.name, x + 4, y);
+      }
+      ctx.restore();
+    }
+
+    // legend
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    const legendX = 12, legendY = 12;
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillRect(legendX - 8, legendY - 8, 140, 90);
+    ctx.fillStyle = '#111827';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('Choropleth (per kecamatan)', legendX, legendY + 8);
+    const steps = 5;
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const val = Math.round(maxCount * t);
+      const col = colorFor(val, maxCount);
+      ctx.fillStyle = col;
+      const boxY = legendY + 18 + s * 14;
+      ctx.fillRect(legendX, boxY, 14, 10);
+      ctx.fillStyle = '#111827';
+      ctx.fillText(val.toString(), legendX + 20, boxY + 9);
+    }
+    ctx.restore();
+  };
+
+  useEffect(() => { draw(); }, [geojson, points, bounds, zoom, showLabels]);
+
+  const zoomIn = () => setZoom(z => { const nz = Math.min(maxZoom, +(z * 1.3).toFixed(2)); zoomRef.current = nz; return nz; });
+  const zoomOut = () => setZoom(z => { const nz = Math.max(minZoom, +(z / 1.3).toFixed(2)); zoomRef.current = nz; return nz; });
+  const resetZoom = () => { zoomRef.current = 1; setZoom(1); };
+
+  return (
+    <div ref={wrapperRef} style={{ height: 450, width: '100%' }} className="bg-white relative">
+      <canvas ref={canvasRef} />
+
+      <div className="absolute top-3 right-3 flex flex-col items-end space-y-2">
+        <div className="flex space-x-2">
+          <button onClick={zoomIn} className="px-2 py-1 bg-white text-sm rounded shadow border">+</button>
+          <button onClick={zoomOut} className="px-2 py-1 bg-white text-sm rounded shadow border">−</button>
+          <button onClick={resetZoom} className="px-2 py-1 bg-white text-sm rounded shadow border">Reset</button>
+        </div>
+        <div className="flex space-x-2">
+          <button onClick={() => setShowLabels(s => !s)} className="px-2 py-1 bg-white text-sm rounded shadow border">{showLabels ? 'Hide Labels' : 'Show Labels'}</button>
+          <button onClick={onFetchGeoJSON} disabled={geoLoading} className="px-3 py-1 bg-white text-sm rounded shadow border">
+            {geoLoading ? 'Memuat...' : (geojson ? 'Segarkan Batas' : 'Muat Batas Kecamatan')}
+          </button>
+        </div>
+        <div className="text-xs text-gray-600 bg-white px-2 py-1 rounded shadow border">Zoom: {zoom}×</div>
+      </div>
+    </div>
+  );
+};
+
+// Fetch GeoJSON: try known raw GitHub/jsDelivr URLs first, then Overpass, then fallback bbox
+const fetchKecamatanGeoJSON = async () => {
+  const candidateUrls = [
+    'https://raw.githubusercontent.com/superpikar/indonesia-geojson/master/kabupaten/jawa-timur/nganjuk.geojson',
+    'https://raw.githubusercontent.com/thetrisatria/geojson-indonesia/master/regencies/nganjuk.geojson',
+    'https://raw.githubusercontent.com/ans-4175/peta-indonesia-geojson/master/kabupaten/35/3518.geojson',
+    'https://cdn.jsdelivr.net/gh/superpikar/indonesia-geojson@master/kabupaten/jawa-timur/nganjuk.geojson'
+  ];
+
+  const fetchWithTimeout = async (url, timeout = 12000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`Status ${res.status}`);
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
+  };
+
+  // Try candidate static URLs first
+  for (const url of candidateUrls) {
+    try {
+      const gj = await fetchWithTimeout(url);
+      if (gj && (gj.type === 'FeatureCollection' || gj.features)) {
+        return gj;
+      }
+    } catch (err) {
+      // ignore and try next
+    }
+  }
+
+  // If static URLs fail, try Overpass endpoints (assemble GeoJSON from relation)
+  const endpoints = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://lz4.overpass-api.de/api/interpreter'
+  ];
+  const query = `
+  [out:json][timeout:25];
+  area["name"="Kabupaten Nganjuk"]["boundary"="administrative"]->.searchArea;
+  relation["admin_level"="6"](area.searchArea);
+  out body;
+  >;
+  out geom;`;
+
+  const tryFetchOverpass = async (baseUrl) => {
+    const full = baseUrl + '?data=' + encodeURIComponent(query);
+    return await fetchWithTimeout(full, 20000);
+  };
+
+  let overpassData = null;
+  for (const ep of endpoints) {
+    try {
+      const d = await tryFetchOverpass(ep);
+      if (d) { overpassData = d; break; }
+    } catch (err) {
+      // try next
+    }
+  }
+
+  if (overpassData) {
+    const elements = overpassData.elements || [];
+    const ways = {};
+    const relations = [];
+    for (const el of elements) {
+      if (el.type === 'way' && el.geometry) {
+        ways[el.id] = el.geometry.map(pt => [pt.lon, pt.lat]);
+      } else if (el.type === 'relation') {
+        relations.push(el);
+      }
+    }
+
+    const features = [];
+    for (const rel of relations) {
+      const polygons = [];
+      const members = rel.members || [];
+      const outerRings = [];
+      for (const m of members) {
+        if (m.type === 'way' && (m.role === 'outer' || m.role === '')) {
+          const w = ways[m.ref];
+          if (w) outerRings.push(w);
+        }
+      }
+      if (outerRings.length === 0) continue;
+      for (const ring of outerRings) {
+        if (ring.length > 0) {
+          const first = ring[0];
+          const last = ring[ring.length - 1];
+          if (first[0] !== last[0] || first[1] !== last[1]) ring.push(first);
+        }
+        polygons.push([ring]);
+      }
+      const feature = {
+        type: 'Feature',
+        properties: rel.tags || {},
+        geometry: {
+          type: polygons.length > 1 ? 'MultiPolygon' : 'Polygon',
+          coordinates: polygons.length > 1 ? polygons : polygons[0]
+        }
+      };
+      features.push(feature);
+    }
+
+    if (features.length > 0) return { type: 'FeatureCollection', features };
+  }
+
+  // As a last resort return an approximate bbox polygon for Kabupaten Nganjuk
+  const minLat = -7.8, maxLat = -7.2, minLon = 111.6, maxLon = 112.2;
+  const coords = [
+    [minLon, minLat],
+    [maxLon, minLat],
+    [maxLon, maxLat],
+    [minLon, maxLat],
+    [minLon, minLat]
+  ];
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { name: 'Kabupaten Nganjuk (approx bbox fallback)' },
+        geometry: { type: 'Polygon', coordinates: [coords] }
+      }
+    ]
+  };
+};
+
 const DesaTaggingDashboard = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [points, setPoints] = useState([]);
   const [sortOrder, setSortOrder] = useState('desc'); // 'asc' or 'desc'
   const [filterText, setFilterText] = useState('');
   const [originalData, setOriginalData] = useState([]);
+  const [geojson, setGeojson] = useState(null);
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [masterDesaList, setMasterDesaList] = useState([]);
+  const [desaToKecMap, setDesaToKecMap] = useState({});
+  const [mapExpanded, setMapExpanded] = useState(false);
+
+  // Normalize desa name for matching keys: remove leading codes like [020] or numeric prefixes, trim, remove punctuation and common words, lowercase
+  const normalizeDesaName = (val) => {
+    if (!val && val !== 0) return '';
+    let s = val.toString().trim();
+    // Remove bracketed codes like [020] or [ 020 ] at start
+    s = s.replace(/^\s*\[\s*\d+\s*\]\s*/g, '');
+    // Remove unbracketed numeric prefixes like 020, 020. or 020 -
+    s = s.replace(/^\s*\d{1,6}[\.\-)\s]+/g, '');
+    // remove common administrative words that may vary in source
+    s = s.replace(/\b(desa|kelurahan|kampung|dusun|ds|ds\.|kel)\b/gi, ' ');
+    // remove diacritics and punctuation, keep only alphanumerics and spaces
+    try {
+      s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    } catch (e) { /* ignore if normalize not available */ }
+    s = s.replace(/[^0-9a-zA-Z\s]/g, ' ');
+    // Collapse multiple spaces and to lower for stable matching
+    s = s.replace(/\s+/g, ' ').trim().toLowerCase();
+    return s;
+  };
+  const [chartExpanded, setChartExpanded] = useState(false);
+
+  // Auto-load default GeoJSON and Excel from public/ if available; fallback to remote fetch for geojson
+  useEffect(() => {
+    let cancelled = false;
+    const tryLoadGeoJSONPublic = async () => {
+      const publicCandidates = ['/nganjuk.gejson', '/nganjuk.geojson', '/nganjuk.json'];
+      for (const path of publicCandidates) {
+        try {
+          const res = await fetch(path);
+          if (!res.ok) continue;
+          const gj = await res.json();
+          return gj;
+        } catch (e) {
+          // ignore
+        }
+      }
+      return null;
+    };
+
+    const tryLoadExcelPublic = async () => {
+      const path = '/kendedes-nganjuk.xlsx';
+      try {
+        const res = await fetch(path);
+        if (!res.ok) return null;
+        const ab = await res.arrayBuffer();
+        const workbook = XLSX.read(ab, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        // also read as array-of-arrays to get column-based data
+        const aoa = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        const desaKecMap = {};
+        if (aoa && aoa.length > 1) {
+          // assume first row is header
+          const header = aoa[0] || [];
+          // find desa column index by header heuristics
+          const desaCandidates = ['desa','nama desa','nama_desa','nm_desa','name','nama'];
+          let desaIdx = null;
+          for (let i = 0; i < header.length; i++) {
+            const h = (header[i] || '').toString().toLowerCase();
+            if (desaCandidates.includes(h)) { desaIdx = i; break; }
+          }
+
+          // find kecamatan column index by header heuristics; fallback to column 10 if header not present
+          const kecCandidates = ['kecamatan','nama kecamatan','kec','nm_kecamatan','nama_kec'];
+          let kecIdx = null;
+          for (let i = 0; i < header.length; i++) {
+            const h = (header[i] || '').toString().toLowerCase();
+            if (kecCandidates.includes(h)) { kecIdx = i; break; }
+          }
+
+          // if kecIdx not found by header, attempt to pick a column that looks like kecamatan (not an email column)
+          if (kecIdx == null) {
+            // scan first few rows and columns to find a column with low email frequency and non-empty strings
+            const sampleRows = Math.min(50, aoa.length - 1);
+            const colScores = new Array(header.length).fill(0);
+            for (let c = 0; c < header.length; c++) {
+              let nonEmpty = 0, emailCount = 0;
+              for (let r = 1; r <= sampleRows; r++) {
+                const v = (aoa[r] && aoa[r][c] != null) ? String(aoa[r][c]).trim() : '';
+                if (!v) continue;
+                nonEmpty++;
+                if (v.indexOf('@') !== -1) emailCount++;
+              }
+              // score: prefer columns with many non-empty and few emails
+              colScores[c] = nonEmpty - emailCount * 2;
+            }
+            // pick highest score column if positive
+            let best = -Infinity, bestIdx = null;
+            for (let c = 0; c < colScores.length; c++) {
+              if (colScores[c] > best) { best = colScores[c]; bestIdx = c; }
+            }
+            if (best > 0) kecIdx = bestIdx;
+          }
+
+          // as last resort, try index 10
+          if (kecIdx == null) kecIdx = 10;
+
+          // iterate rows and extract kecamatan using detected kecIdx
+          for (let r = 1; r < Math.min(aoa.length, 2000); r++) {
+            const row = aoa[r];
+            if (!row) continue;
+            const kec = row[kecIdx];
+            const desaNameRaw = desaIdx != null ? (row[desaIdx] || '') : (row[0] || '');
+            const desaName = desaNameRaw.toString().trim();
+            if (!desaName) continue;
+            const key = normalizeDesaName(desaName);
+            desaKecMap[key] = (kec || '').toString().trim();
+          }
+        }
+        // debug: log detected desa/kecamatan mapping sample
+        try {
+          console.debug('tryLoadExcelPublic: detected desa->kecamatan count=', Object.keys(desaKecMap).length);
+          console.debug('tryLoadExcelPublic: sample mapping=', Object.entries(desaKecMap).slice(0, 10));
+        } catch (e) { /* ignore */ }
+        return { jsonData, desaKecMap };
+      } catch (e) {
+        return null;
+      }
+    };
+
+    (async () => {
+      try {
+        setLoading(true);
+        // GeoJSON: try public first
+        const localGJ = await tryLoadGeoJSONPublic();
+        if (!cancelled && localGJ) {
+          setGeojson(localGJ);
+        } else {
+          // fallback to remote/autofetch function
+          try {
+            setGeoLoading(true);
+            const gj = await fetchKecamatanGeoJSON();
+            if (!cancelled) setGeojson(gj);
+          } catch (err) {
+            console.warn('Auto GeoJSON fetch failed', err);
+          } finally {
+            if (!cancelled) setGeoLoading(false);
+          }
+        }
+
+        // Excel: try public
+        const excelRes = await tryLoadExcelPublic();
+        const jsonData = excelRes && excelRes.jsonData ? excelRes.jsonData : null;
+        const publicDesaKecMap = excelRes && excelRes.desaKecMap ? excelRes.desaKecMap : {};
+        if (!cancelled && jsonData && jsonData.length) {
+          // Build master desa list from Excel if possible
+          try {
+            const names = new Set();
+            for (const row of jsonData) {
+              const name = (row.Desa || row.desa || row.nama_desa || row.nama || row.NAMA || row.nm_desa || row.name || row['Nama Desa'])?.toString().trim();
+              if (name) names.add(name);
+            }
+            if (names.size) setMasterDesaList(Array.from(names).sort());
+          } catch (e) { /* ignore */ }
+
+          // if public excel provided desa->kecamatan map, store it
+          if (publicDesaKecMap && Object.keys(publicDesaKecMap).length) {
+            setDesaToKecMap(publicDesaKecMap);
+          }
+
+          // Diagnostic: check specific desa names reported missing and log matching rows & mapping
+          try {
+            const reported = [
+              '[006] GODEAN','[006] CANGKRINGAN','[010] SUMBERWINDU','[016] JEDONGCANGKRING','[004] KALIANYAR','[001] SALAMROJO','[004] BENDOLO','[010] PULOWETAN','[013] TRAYANG','[003] TEMPURAN','[004] JEGREG','[004] KWEDEN','[006] BAJANG','[013] CANDI MULYO','[014] DANDANGAN','[002] SEDENGAN MIJEN','[003] KATRUNGAN','[010] JATIKALANG','[014] TANGGUL','[016] PAGERNGUMBUK','[002] BANGSONGAN','[003] TAMANAN','[008] BRANGKAL','[008] MOJOROTO','[011] LARANGAN TOKOL','[011] WONOAYU','[016] POCANAN','[023] CANDINEGORO'
+            ];
+            const normReported = reported.map(r => normalizeDesaName(r));
+            const foundRows = [];
+            for (const row of jsonData || []) {
+              const rawName = (row.Desa || row.desa || row.nama_desa || row.nama || row.NAMA || row.nm_desa || row.name || row['Nama Desa'])?.toString().trim();
+              if (!rawName) continue;
+              const nk = normalizeDesaName(rawName);
+              if (normReported.includes(nk)) {
+                foundRows.push({ rawName, normalized: nk, row });
+              }
+            }
+            console.debug('Diagnostics: number of reported desa to inspect=', reported.length, 'found in excel rows=', foundRows.length);
+            console.debug('Diagnostics: sample foundRows=', foundRows.slice(0, 50));
+            // also log whether publicDesaKecMap has mapping for those keys
+            const mappingChecks = normReported.map(k => ({ key: k, publicMapValue: publicDesaKecMap[k] }));
+            console.debug('Diagnostics: publicDesaKecMap presence for reported desa=', mappingChecks);
+          } catch (e) { console.error('Diagnostics logging failed', e); }
+
+          // reuse same processing code as handleFileUpload to fill points and counts
+          const desaCount = {};
+          const newPoints = [];
+          const latCandidates = ['lat', 'latitude', 'lintang', 'y', 'koordinat_lat', 'latitude (y)'];
+          const lonCandidates = ['lon', 'lng', 'longitude', 'bujur', 'x', 'koordinat_lon', 'longitude (x)'];
+          const combinedCoordCandidates = ['koordinat', 'coordinate', 'coord', 'coordinates'];
+          const findKey = (obj, candidates) => {
+            const keys = Object.keys(obj);
+            const lowerMap = keys.reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
+            for (const cand of candidates) {
+              const k = lowerMap[cand.toLowerCase()];
+              if (k) return k;
+            }
+            return null;
+          };
+          jsonData.forEach((row, idx) => {
+            const desa = (row.Desa || row.desa || row.nama_desa || row.nama || row.NAMA || row.nm_desa)?.toString().trim();
+            if (desa && desa !== '') desaCount[desa] = (desaCount[desa] || 0) + 1;
+            let latKey = findKey(row, latCandidates);
+            let lonKey = findKey(row, lonCandidates);
+            let latVal = latKey ? row[latKey] : undefined;
+            let lonVal = lonKey ? row[lonKey] : undefined;
+            if ((latVal == null || lonVal == null)) {
+              const comboKey = findKey(row, combinedCoordCandidates);
+              if (comboKey && typeof row[comboKey] === 'string') {
+                const parts = row[comboKey].split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+                if (parts.length >= 2) { latVal = parts[0]; lonVal = parts[1]; }
+              }
+            }
+            const toNum = (v) => {
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') {
+                const cleaned = v.replace(/,/g, '.').replace(/[^0-9+\-.]/g, '');
+                const n = parseFloat(cleaned);
+                return Number.isFinite(n) ? n : null;
+              }
+              return null;
+            };
+            const lat = toNum(latVal);
+            const lon = toNum(lonVal);
+            if (lat != null && lon != null && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+              newPoints.push({ id: `${idx}-${desa || 'row'}`, desa: desa || '-', lat, lon, row });
+            }
+          });
+          const processedData = Object.entries(desaCount).map(([desa, count]) => ({ desa, count, percentage: ((count / jsonData.length) * 100).toFixed(2) }));
+          setOriginalData(processedData);
+          sortData(processedData, 'desc');
+          setPoints(newPoints);
+        }
+      } catch (err) {
+        console.warn('Default data load failed', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
 
   // Proses upload file Excel
   const handleFileUpload = (event) => {
@@ -25,13 +745,61 @@ const DesaTaggingDashboard = () => {
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-        // Proses data untuk mendapatkan jumlah tagging per desa
+        // Proses data untuk mendapatkan jumlah tagging per desa dan kumpulkan titik koordinat
         const desaCount = {};
-        
-        jsonData.forEach(row => {
+        const newPoints = [];
+
+        const latCandidates = ['lat', 'latitude', 'lintang', 'y', 'koordinat_lat', 'latitude (y)'];
+        const lonCandidates = ['lon', 'lng', 'longitude', 'bujur', 'x', 'koordinat_lon', 'longitude (x)'];
+        const combinedCoordCandidates = ['koordinat', 'coordinate', 'coord', 'coordinates'];
+
+        const findKey = (obj, candidates) => {
+          const keys = Object.keys(obj);
+          const lowerMap = keys.reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
+          for (const cand of candidates) {
+            const k = lowerMap[cand.toLowerCase()];
+            if (k) return k;
+          }
+          return null;
+        };
+
+        jsonData.forEach((row, idx) => {
           const desa = row.Desa?.toString().trim();
           if (desa && desa !== '') {
             desaCount[desa] = (desaCount[desa] || 0) + 1;
+          }
+
+          // Ekstrak koordinat per baris
+          let latKey = findKey(row, latCandidates);
+          let lonKey = findKey(row, lonCandidates);
+          let latVal = latKey ? row[latKey] : undefined;
+          let lonVal = lonKey ? row[lonKey] : undefined;
+
+          if ((latVal == null || lonVal == null)) {
+            const comboKey = findKey(row, combinedCoordCandidates);
+            if (comboKey && typeof row[comboKey] === 'string') {
+              const parts = row[comboKey].split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+              if (parts.length >= 2) {
+                latVal = parts[0];
+                lonVal = parts[1];
+              }
+            }
+          }
+
+          const toNum = (v) => {
+            if (typeof v === 'number') return v;
+            if (typeof v === 'string') {
+              const cleaned = v.replace(/,/g, '.').replace(/[^0-9+\-.]/g, '');
+              const n = parseFloat(cleaned);
+              return Number.isFinite(n) ? n : null;
+            }
+            return null;
+          };
+
+          const lat = toNum(latVal);
+          const lon = toNum(lonVal);
+          if (lat != null && lon != null && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+            newPoints.push({ id: `${idx}-${desa || 'row'}`, desa: desa || '-', lat, lon, row });
           }
         });
 
@@ -44,6 +812,7 @@ const DesaTaggingDashboard = () => {
 
         setOriginalData(processedData);
         sortData(processedData, 'desc');
+        setPoints(newPoints);
         setLoading(false);
       } catch (error) {
         console.error('Error processing file:', error);
@@ -80,20 +849,236 @@ const DesaTaggingDashboard = () => {
 
   // Export data ke Excel
   const exportToExcel = () => {
-    // Buat salinan data yang difilter dan urutkan berdasarkan count tertinggi
-    const dataForExport = [...filteredData].sort((a, b) => b.count - a.count);
-    
-    const exportData = dataForExport.map((item, index) => ({
-      'Ranking': index + 1,
-      'Nama Desa': item.desa,
-      'Jumlah Tagging': item.count,
-      'Persentase (%)': item.percentage
+    // Prepare mapping desa -> count
+    const countsMap = {};
+    for (const it of originalData) countsMap[it.desa] = it.count;
+
+    // Build union of master list and existing desa
+    const union = new Set([...masterDesaList, ...Object.keys(countsMap)]);
+    for (const it of data) union.add(it.desa);
+
+    // local point-in-polygon helpers for export (ray-casting)
+    const pointInRingLocal = (x, y, ring) => {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const xi = ring[i][0], yi = ring[i][1];
+        const xj = ring[j][0], yj = ring[j][1];
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi + 0.0) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    };
+    const pointInPolygonLocal = (lon, lat, polygon) => {
+      if (!polygon || polygon.length === 0) return false;
+      if (pointInRingLocal(lon, lat, polygon[0])) {
+        for (let i = 1; i < polygon.length; i++) {
+          if (pointInRingLocal(lon, lat, polygon[i])) return false;
+        }
+        return true;
+      }
+      return false;
+    };
+
+    const findKecamatanForPoint = (lat, lon) => {
+      if (!geojson || !geojson.features) return '';
+      for (const f of geojson.features) {
+        if (!f.geometry) continue;
+        const geom = f.geometry;
+        if (geom.type === 'Polygon') {
+          if (pointInPolygonLocal(lon, lat, geom.coordinates)) return (f.properties && (f.properties.name || f.properties.NAME || f.properties.nama || f.properties.KAB || f.properties.kecamatan || f.properties.kec || f.properties.NAME_2)) || '';
+        } else if (geom.type === 'MultiPolygon') {
+          for (const poly of geom.coordinates) {
+            if (pointInPolygonLocal(lon, lat, poly)) return (f.properties && (f.properties.name || f.properties.NAME || f.properties.nama || f.properties.KAB || f.properties.kecamatan || f.properties.kec || f.properties.NAME_2)) || '';
+          }
+        }
+      }
+      return '';
+    };
+
+    // Map desa -> kecamatan by sampling any point with that desa (use normalized keys)
+    const desaToKecNorm = {};
+    for (const p of points || []) {
+      const key = normalizeDesaName(p.desa);
+      if (!desaToKecNorm[key]) {
+        const k = findKecamatanForPoint(p.lat, p.lon);
+        desaToKecNorm[key] = k || '';
+      }
+    }
+
+    // Public mapping from excel (normalized keys)
+    const publicMap = desaToKecMap || {};
+
+    // Helper: detect if a value is a likely kecamatan string (not an email)
+    const isLikelyKecamatan = (v) => {
+      if (!v) return false;
+      const s = v.toString().trim();
+      if (!s) return false;
+      if (s.indexOf('@') !== -1) return false; // email
+      // if it contains digits only or looks like an email/phone, reject
+      const alpha = s.replace(/[^A-Za-z\s]/g, '').trim();
+      return alpha.length >= 2;
+    };
+
+    // Try to resolve kecamatan via exact or fuzzy matching on normalized keys
+    const resolveKecamatan = (desaNameRaw) => {
+      const key = normalizeDesaName(desaNameRaw);
+      if (!key) return '';
+      // 1) exact match in public map
+      if (publicMap[key] && isLikelyKecamatan(publicMap[key])) return publicMap[key];
+      // 2) exact match in sampled geo mapping
+      if (desaToKecNorm[key] && isLikelyKecamatan(desaToKecNorm[key])) return desaToKecNorm[key];
+      // 3) exact compact match (ignore spaces/punctuation)
+      const compactKey = key.replace(/\s+/g, '');
+      for (const [k, v] of Object.entries(publicMap)) {
+        if (!v || !isLikelyKecamatan(v)) continue;
+        if (k.replace(/\s+/g, '') === compactKey) return v;
+      }
+
+      // 4) token-overlap fuzzy scoring on public map
+      const keyTokens = key.split(' ').filter(Boolean);
+      const candidateScores = [];
+      for (const [k, v] of Object.entries(publicMap)) {
+        if (!v || !isLikelyKecamatan(v)) continue;
+        const kTokens = k.split(' ').filter(Boolean);
+        const common = kTokens.filter(t => keyTokens.includes(t)).length;
+        let score = common;
+        if (k === key) score += 5;
+        if (k.includes(key) || key.includes(k)) score += 2;
+        if (score > 0) candidateScores.push({ k, v, score });
+      }
+      if (candidateScores.length) {
+        candidateScores.sort((a, b) => b.score - a.score);
+        return candidateScores[0].v;
+      }
+
+      // 5) token-overlap fuzzy scoring on geo sampled mapping
+      const candidateScores2 = [];
+      for (const [k, v] of Object.entries(desaToKecNorm)) {
+        if (!v || !isLikelyKecamatan(v)) continue;
+        const kTokens = k.split(' ').filter(Boolean);
+        const common = kTokens.filter(t => keyTokens.includes(t)).length;
+        let score = common;
+        if (k === key) score += 5;
+        if (k.includes(key) || key.includes(k)) score += 2;
+        if (score > 0) candidateScores2.push({ k, v, score });
+      }
+      if (candidateScores2.length) {
+        candidateScores2.sort((a, b) => b.score - a.score);
+        return candidateScores2[0].v;
+      }
+
+      return '';
+    };
+
+    // final rows using normalization for lookup with fuzzy fallback
+    const rows = [];
+    // collect examples of missing kecamatan for debugging
+    const missingExamples = [];
+    union.forEach((desaName) => {
+      const cnt = countsMap[desaName] || 0;
+      const key = normalizeDesaName(desaName);
+      const sampleKec = resolveKecamatan(desaName) || '';
+      if (!sampleKec) {
+        // log immediately
+        console.warn('exportToExcel: missing Kecamatan for desa', { desaName, key, publicMapValue: publicMap[key], sampledValue: desaToKecNorm[key] });
+        // compute candidate matches from publicMap
+        try {
+          const candidates = [];
+          const keyTokens = key.split(' ').filter(Boolean);
+          for (const [pk, pv] of Object.entries(publicMap)) {
+            if (!pk) continue;
+            const pkTokens = pk.split(' ').filter(Boolean);
+            // token overlap
+            const common = pkTokens.filter(t => keyTokens.includes(t)).length;
+            let score = common * 10;
+            if (pk === key) score += 100;
+            if (pk.includes(key) || key.includes(pk)) score += 30;
+            if (pk.startsWith(key) || key.startsWith(pk)) score += 20;
+            // prefer non-email pv
+            if (pv && pv.toString().indexOf('@') !== -1) score -= 50;
+            candidates.push({ pk, pv, score });
+          }
+          candidates.sort((a,b) => b.score - a.score);
+          const top = candidates.slice(0,5);
+          console.debug('exportToExcel: top publicMap candidates for', desaName, key, top);
+          if (missingExamples.length < 20) missingExamples.push({ desaName, key, publicMapValue: publicMap[key], sampledValue: desaToKecNorm[key], topCandidates: top });
+        } catch (e) {
+          console.error('exportToExcel: candidate match failed', e);
+          if (missingExamples.length < 20) missingExamples.push({ desaName, key, publicMapValue: publicMap[key], sampledValue: desaToKecNorm[key] });
+        }
+      }
+      rows.push({ 'Nama Kecamatan': sampleKec, 'Nama Desa': desaName, 'Jumlah Tagging': cnt, 'Persentase (%)': totalData ? ((cnt / totalData) * 100).toFixed(2) : '0.00' });
+    });
+    if (missingExamples.length) {
+      try { console.debug('exportToExcel: missing kecamatan examples (up to 20)=', missingExamples); } catch (e) {}
+    }
+
+    // Sort rows by count desc
+    rows.sort((a, b) => b['Jumlah Tagging'] - a['Jumlah Tagging']);
+
+    // Ensure desired column order: Ranking, Nama Desa, Nama Kecamatan, Jumlah Tagging, Persentase (%)
+    const ordered = rows.map((r, idx) => ({
+      Ranking: idx + 1,
+      'Nama Desa': r['Nama Desa'],
+      'Nama Kecamatan': r['Nama Kecamatan'],
+      'Jumlah Tagging': r['Jumlah Tagging'],
+      'Persentase (%)': r['Persentase (%)']
     }));
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Data Tagging per Desa');
+    // Use AoA to preserve column order
+    const header = ['Ranking', 'Nama Desa', 'Nama Kecamatan', 'Jumlah Tagging', 'Persentase (%)'];
+    const sheetData = [header, ...ordered.map(r => header.map(h => r[h]))];
+    const ws1 = XLSX.utils.aoa_to_sheet(sheetData);
+    XLSX.utils.book_append_sheet(wb, ws1, 'Data Tagging per Desa');
+
+    // Also create a sheet for desa with zero tagging
+    const zeroRows = ordered.filter(r => r['Jumlah Tagging'] === 0).map(r => [r['Ranking'], r['Nama Desa'], r['Nama Kecamatan'], r['Jumlah Tagging']]);
+    const ws2 = XLSX.utils.aoa_to_sheet([['Ranking', 'Nama Desa', 'Nama Kecamatan', 'Jumlah Tagging'], ...zeroRows]);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Belum Ditagging');
+
     XLSX.writeFile(wb, 'sebaran_tagging_desa.xlsx');
+  };
+
+  // Helper: pusat koordinat default (Kabupaten Nganjuk)
+  const CENTER_LAT = -7.603;
+  const CENTER_LON = 111.901;
+
+  // Generate synthetic test data (fast) untuk menguji performa peta
+  const generateTestData = (n = 5000) => {
+    setLoading(true);
+    // jalankan di next tick agar spinner muncul
+    setTimeout(() => {
+      const newPoints = [];
+      const desaCount = {};
+      const desaPool = 300; // jumlah desa unik simulasi
+      for (let i = 0; i < n; i++) {
+        const lat = CENTER_LAT + (Math.random() - 0.5) * 0.4; // +-0.2 deg
+        const lon = CENTER_LON + (Math.random() - 0.5) * 0.6; // +-0.3 deg
+        const desaIndex = (i % desaPool) + 1;
+        const desa = `DESA ${String(desaIndex).padStart(3, '0')}`;
+        desaCount[desa] = (desaCount[desa] || 0) + 1;
+        newPoints.push({ id: `g-${i}`, desa, lat, lon, row: {} });
+      }
+
+      const processedData = Object.entries(desaCount).map(([desa, count]) => ({
+        desa,
+        count,
+        percentage: ((count / n) * 100).toFixed(2)
+      }));
+
+      setOriginalData(processedData);
+      sortData(processedData, 'desc');
+      setPoints(newPoints);
+      setLoading(false);
+    }, 20);
+  };
+
+  const clearData = () => {
+    setOriginalData([]);
+    setData([]);
+    setPoints([]);
+    setFilterText('');
   };
 
   // Komponen Progress Bar
@@ -119,6 +1104,11 @@ const DesaTaggingDashboard = () => {
   };
 
   const maxCount = data.length > 0 ? Math.max(...data.map(item => item.count)) : 0;
+  const filteredPoints = useMemo(() => {
+    if (!filterText) return points;
+    return points.filter(p => (p.desa || '').toLowerCase().includes(filterText.toLowerCase()));
+  }, [points, filterText]);
+
   const totalData = originalData.reduce((sum, item) => sum + item.count, 0);
 
   return (
@@ -186,6 +1176,63 @@ const DesaTaggingDashboard = () => {
                 className="hidden"
               />
             </label>
+
+            <label className="flex items-center space-x-2 px-4 py-2 bg-white text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors">
+              <svg width="16" height="16" className="lucide lucide-file-text"><path d="M"/></svg>
+              <span>Unggah GeoJSON</span>
+              <input
+                type="file"
+                accept=".geojson,application/json"
+                onChange={async (e) => {
+                  const f = e.target.files[0];
+                  if (!f) return;
+                  try {
+                    setGeoLoading(true);
+                    const txt = await f.text();
+                    const gj = JSON.parse(txt);
+                    setGeojson(gj);
+                  } catch (err) {
+                    alert('Gagal memuat GeoJSON dari file. Pastikan format valid.');
+                  } finally {
+                    setGeoLoading(false);
+                  }
+                }}
+                className="hidden"
+              />
+            </label>
+
+            <button
+              onClick={() => generateTestData(5000)}
+              className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg border border-gray-200 hover:bg-gray-200 transition"
+              title="Generate 5000 titik (test)"
+            >
+              Generate 5k titik
+            </button>
+
+            <button
+              onClick={clearData}
+              className="px-3 py-2 bg-red-50 text-red-600 rounded-lg border border-red-100 hover:bg-red-100 transition"
+              title="Clear semua data"
+            >
+              Clear
+            </button>
+
+            <div className="ml-2 text-xs text-gray-500">Atau coba URL publik:</div>
+            <div className="flex flex-col ml-2 space-y-1">
+              <button onClick={async () => {
+                try { setGeoLoading(true); const gj = await fetch('https://raw.githubusercontent.com/superpikar/indonesia-geojson/master/kabupaten/jawa-timur/nganjuk.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 1'); } finally { setGeoLoading(false); }
+              }} className="px-2 py-1 bg-white rounded border text-xs">Use raw.githubusercontent.com/superpikar</button>
+              <button onClick={async () => {
+                try { setGeoLoading(true); const gj = await fetch('https://raw.githubusercontent.com/thetrisatria/geojson-indonesia/master/regencies/nganjuk.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 2'); } finally { setGeoLoading(false); }
+              }} className="px-2 py-1 bg-white rounded border text-xs">Use raw.githubusercontent.com/thetrisatria</button>
+              <button onClick={async () => {
+                try { setGeoLoading(true); const gj = await fetch('https://raw.githubusercontent.com/ans-4175/peta-indonesia-geojson/master/kabupaten/35/3518.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 3'); } finally { setGeoLoading(false); }
+              }} className="px-2 py-1 bg-white rounded border text-xs">Use raw.githubusercontent.com/ans-4175</button>
+              <button onClick={async () => {
+                try { setGeoLoading(true); const gj = await fetch('https://cdn.jsdelivr.net/gh/superpikar/indonesia-geojson@master/kabupaten/jawa-timur/nganjuk.geojson').then(r => r.json()); setGeojson(gj); } catch (e) { console.warn(e); alert('Gagal memuat dari URL 4'); } finally { setGeoLoading(false); }
+              }} className="px-2 py-1 bg-white rounded border text-xs">Use jsdelivr superpikar</button>
+            </div>
+
             {loading && (
               <div className="flex items-center space-x-2">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
@@ -268,19 +1315,25 @@ const DesaTaggingDashboard = () => {
 
               {/* Chart */}
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">Top 20 Desa</h2>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold text-gray-800">Top 20 Desa</h2>
+                  <div className="flex items-center space-x-2">
+                    <button onClick={() => setChartExpanded(true)} className="px-3 py-1 bg-white text-sm rounded shadow border">Expand Chart</button>
+                    <button onClick={exportToExcel} className="px-3 py-1 bg-green-600 text-white rounded shadow">Export</button>
+                  </div>
+                </div>
                 <ResponsiveContainer width="100%" height={400}>
                   <BarChart data={filteredData.slice(0, 20)} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="desa" 
+                    <XAxis
+                      dataKey="desa"
                       angle={-45}
                       textAnchor="end"
                       height={80}
                       fontSize={10}
                     />
                     <YAxis />
-                    <Tooltip 
+                    <Tooltip
                       formatter={(value, name) => [`${value.toLocaleString()} entri`, 'Jumlah Tagging']}
                       labelStyle={{ color: '#374151' }}
                     />
@@ -288,7 +1341,79 @@ const DesaTaggingDashboard = () => {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+
+              {/* Map */}
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-xl font-semibold text-gray-800">Sebaran Titik Desa (ringan)</h2>
+                  <div className="flex items-center space-x-3">
+                    <div className="text-sm text-gray-600">{filteredPoints.length.toLocaleString()} titik</div>
+                    <button onClick={() => setMapExpanded(true)} className="px-3 py-1 bg-white text-sm rounded shadow border">Expand Map</button>
+                  </div>
+                </div>
+                <div className="rounded-lg overflow-hidden border border-gray-100">
+                  <CanvasChoroplethMap points={filteredPoints} geojson={geojson} onFetchGeoJSON={async () => {
+                    try {
+                      setGeoLoading(true);
+                      const gj = await fetchKecamatanGeoJSON();
+                      setGeojson(gj);
+                    } catch (err) {
+                      console.error('GeoJSON fetch failed', err);
+                      alert('Gagal memuat GeoJSON dari Overpass. Silakan unggah file GeoJSON manual jika perlu.');
+                    } finally {
+                      setGeoLoading(false);
+                    }
+                  }} geoLoading={geoLoading} />
+                </div>
+                <p className="mt-2 text-xs text-gray-500">Visualisasi titik ringan tanpa peta dasar — cocok untuk ribuan titik.</p>
+              </div>
             </div>
+
+            {/* Expanded overlays */}
+            {mapExpanded && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="bg-white w-[90vw] h-[90vh] rounded shadow-lg overflow-hidden">
+                  <div className="p-3 flex justify-between items-center border-b">
+                    <div className="font-semibold">Peta Sebaran (Expanded)</div>
+                    <div className="space-x-2">
+                      <button onClick={() => setMapExpanded(false)} className="px-3 py-1 bg-white rounded border">Close</button>
+                    </div>
+                  </div>
+                  <div className="p-4 h-full">
+                    <CanvasChoroplethMap points={filteredPoints} geojson={geojson} onFetchGeoJSON={async () => {
+                      try { setGeoLoading(true); const gj = await fetchKecamatanGeoJSON(); setGeojson(gj); } catch (err) { console.error(err); alert('Gagal memuat GeoJSON'); } finally { setGeoLoading(false); }
+                    }} geoLoading={geoLoading} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {chartExpanded && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="bg-white w-[90vw] h-[90vh] rounded shadow-lg overflow-hidden">
+                  <div className="p-3 flex justify-between items-center border-b">
+                    <div className="font-semibold">Chart Top Desa (Expanded)</div>
+                    <div className="space-x-2">
+                      <button onClick={() => setChartExpanded(false)} className="px-3 py-1 bg-white rounded border">Close</button>
+                    </div>
+                  </div>
+                  <div className="p-4 h-full">
+                    <div style={{ height: '100%', width: '100%' }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={filteredData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="desa" angle={-45} textAnchor="end" height={80} fontSize={12} />
+                          <YAxis />
+                          <Tooltip formatter={(value) => [`${value.toLocaleString()} entri`, 'Jumlah Tagging']} />
+                          <Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </>
         )}
 
