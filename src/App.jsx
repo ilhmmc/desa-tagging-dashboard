@@ -2018,6 +2018,7 @@ const DesaTaggingDashboard = () => {
         'Nama Kecamatan': sample.kec || '',
         'Nama Desa': sample.desa || '',
         'Jumlah Tagging': cnt,
+        'Jumlah Muatan Usaha Wilkerstat': denom || 0,
         'Persentase (%)': pct
       };
     });
@@ -2025,18 +2026,19 @@ const DesaTaggingDashboard = () => {
     // Sort rows by count desc
     rows.sort((a, b) => b['Jumlah Tagging'] - a['Jumlah Tagging']);
 
-    // Ensure desired column order: Ranking, Nama Kecamatan, Nama Desa, Jumlah Tagging, Persentase (%)
+    // Ensure desired column order: Ranking, Nama Kecamatan, Nama Desa, Jumlah Tagging, Jumlah Muatan Usaha Wilkerstat, Persentase (%)
     const ordered = rows.map((r, idx) => ({
       Ranking: idx + 1,
       'Nama Kecamatan': r['Nama Kecamatan'],
       'Nama Desa': r['Nama Desa'],
       'Jumlah Tagging': r['Jumlah Tagging'],
+      'Jumlah Muatan Usaha Wilkerstat': r['Jumlah Muatan Usaha Wilkerstat'],
       'Persentase (%)': r['Persentase (%)']
     }));
 
     const wb = XLSX.utils.book_new();
     // Use AoA to preserve column order
-    const header = ['Ranking','Nama Kecamatan','Nama Desa','Jumlah Tagging','Persentase (%)'];
+    const header = ['Ranking','Nama Kecamatan','Nama Desa','Jumlah Tagging','Jumlah Muatan Usaha Wilkerstat','Persentase (%)'];
     const sheetData = [header, ...ordered.map(r => header.map(h => r[h]))];
     const ws1 = XLSX.utils.aoa_to_sheet(sheetData);
     XLSX.utils.book_append_sheet(wb, ws1, 'Data Tagging per Desa');
