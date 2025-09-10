@@ -695,6 +695,54 @@ const DesaTaggingDashboard = () => {
     return s;
   };
 
+  // Robust numeric parser for values like 1.201, 1,201, 1 201, or 1201
+  const parseNumberSmart = (v) => {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    let s = String(v).trim();
+    if (/^[0-9.,\s]+$/.test(s)) {
+      const lastSep = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+      if (lastSep !== -1) {
+        const frac = s.slice(lastSep + 1);
+        if (/^\d{3}$/.test(frac) && /[.,]/.test(s.slice(0, lastSep))) {
+          s = s.replace(/[.,\s]/g, '');
+          const n = parseFloat(s);
+          return Number.isFinite(n) ? n : null;
+        }
+      }
+      s = s.replace(/\s+/g, '');
+      if (s.includes(',') && s.includes('.')) {
+        if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+          s = s.replace(/\./g, '').replace(/,/g, '.');
+        } else {
+          s = s.replace(/,/g, '');
+        }
+      } else if (s.includes(',')) {
+        s = s.replace(/\./g, '').replace(/,/g, '.');
+      } else {
+        const parts = s.split('.');
+        if (parts.length > 2) s = parts.join('');
+      }
+    } else {
+      s = s.replace(/[^0-9+\-.]/g, '');
+    }
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Find the muatan column (case-insensitive, punctuation-insensitive)
+  const findMuatanKeyGeneric = (rec) => {
+    const keys = Object.keys(rec || {});
+    const norm = (k) => k.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const target = 'jumlahmuatanusahawilkerstat';
+    for (const k of keys) if (norm(k) === target) return k;
+    for (const k of keys) {
+      const nk = norm(k);
+      if (nk.includes('muatan') && nk.includes('usaha') && nk.includes('wilkerstat')) return k;
+    }
+    return null;
+  };
+
   const buildMuatanIndexes = (map) => {
     const byNames = {};
     const byDesa = {};
