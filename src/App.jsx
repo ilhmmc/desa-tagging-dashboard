@@ -2243,6 +2243,7 @@ const DesaTaggingDashboard = () => {
                       max={maxCount}
                       label={`${index + 1}. ${item.desa}`}
                       count={item.count}
+                      percentMU={item.percentageMU}
                     />
                   ))}
                 </div>
