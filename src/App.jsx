@@ -1973,8 +1973,9 @@ const DesaTaggingDashboard = () => {
   };
 
   // Komponen Progress Bar
-  const ProgressBar = ({ value, max, label, count }) => {
-    const percentage = (value / max) * 100;
+  const ProgressBar = ({ value, max, label, count, percentMU }) => {
+    const percentage = max > 0 ? (value / max) * 100 : 0;
+    const pctText = percentMU != null ? `${percentMU.toFixed(1)}%` : "—";
     return (
       <div className="p-4 mb-4 bg-white border border-gray-200 rounded-lg shadow">
         <div className="flex items-center justify-between mb-2">
@@ -1986,13 +1987,7 @@ const DesaTaggingDashboard = () => {
               {count.toLocaleString()}
             </span>
             <span className="text-xs text-gray-500">
-              (
-              {(
-                (value /
-                  originalData.reduce((sum, item) => sum + item.count, 0)) *
-                100
-              ).toFixed(1)}
-              %)
+              ({pctText})
             </span>
           </div>
         </div>
