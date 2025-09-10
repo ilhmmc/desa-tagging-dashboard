@@ -2007,21 +2007,80 @@ const DesaTaggingDashboard = () => {
       if (!pairSample[pairKey]) pairSample[pairKey] = { kec: finalKec || '', desa: finalDesa || '' };
     }
 
-    // Build ordered rows from pairCounts
-    const rows = Object.entries(pairCounts).map(([pairKey, cnt]) => {
-      const sample = pairSample[pairKey] || { kec: '', desa: '' };
-      const nk = normalizeGeneralName(sample.kec || '');
-      const nd = normalizeDesaName(sample.desa || '');
-      const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
-      const pct = denom && denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '';
-      return {
-        'Nama Kecamatan': sample.kec || '',
-        'Nama Desa': sample.desa || '',
-        'Jumlah Tagging': cnt,
-        'Jumlah Muatan Usaha Wilkerstat': denom || 0,
-        'Persentase (%)': pct
-      };
-    });
+    // Prefer ID-based aggregation using daftar-desa.xlsx to ensure exact matching
+    const extractId = (r) => {
+      try {
+        const keys = Object.keys(r || {});
+        const vals = keys.map((k) => String(r[k] ?? ""));
+        const digits = [];
+        for (const v of vals) {
+          const ms = v.match(/\[(\d+)\]/g);
+          if (ms) for (const it of ms) digits.push(it.replace(/[^0-9]/g, ""));
+        }
+        for (let i = 0; i < digits.length; i++) {
+          const a = digits[i] || "";
+          const b = digits[i + 1] || "";
+          const c = digits[i + 2] || "";
+          if (a.length === 4 && b.length === 3 && c.length === 3) return `${a}${b}${c}`;
+        }
+      } catch (e) {}
+      return null;
+    };
+
+    const idCounts = {};
+    const idMeta = {};
+    if (daftarDesaMap && Object.keys(daftarDesaMap).length) {
+      for (const r of filteredRows) {
+        const id10 = extractId(r);
+        if (id10 && daftarDesaMap[id10]) {
+          idCounts[id10] = (idCounts[id10] || 0) + 1;
+          if (!idMeta[id10]) {
+            const rec = daftarDesaMap[id10];
+            const muKey = findMuatanKeyGeneric(rec);
+            const muatan = muKey ? parseNumberSmart(rec[muKey]) : null;
+            idMeta[id10] = {
+              kec: String(
+                rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || ''
+              ).trim(),
+              desa: String(
+                rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa || ''
+              ).trim(),
+              muatan: muatan || 0,
+            };
+          }
+        }
+      }
+    }
+
+    // Build ordered rows: use ID-based if available, else fallback to name-based pairCounts
+    const rows = (Object.keys(idCounts).length
+      ? Object.entries(idCounts).map(([id10, cnt]) => {
+          const meta = idMeta[id10] || { kec: '', desa: '', muatan: 0 };
+          const denom = meta.muatan || 0;
+          const pct = denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '';
+          return {
+            'Nama Kecamatan': meta.kec,
+            'Nama Desa': meta.desa || id10,
+            'Jumlah Tagging': cnt,
+            'Jumlah Muatan Usaha Wilkerstat': denom,
+            'Persentase (%)': pct
+          };
+        })
+      : Object.entries(pairCounts).map(([pairKey, cnt]) => {
+          const sample = pairSample[pairKey] || { kec: '', desa: '' };
+          const nk = normalizeGeneralName(sample.kec || '');
+          const nd = normalizeDesaName(sample.desa || '');
+          const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
+          const pct = denom && denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '';
+          return {
+            'Nama Kecamatan': sample.kec || '',
+            'Nama Desa': sample.desa || '',
+            'Jumlah Tagging': cnt,
+            'Jumlah Muatan Usaha Wilkerstat': denom || 0,
+            'Persentase (%)': pct
+          };
+        })
+    );
 
     // Sort rows by count desc
     rows.sort((a, b) => b['Jumlah Tagging'] - a['Jumlah Tagging']);
