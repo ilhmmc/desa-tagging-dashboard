@@ -1317,7 +1317,7 @@ const DesaTaggingDashboard = () => {
               });
             }
           });
-          const processedData = Object.entries(desaCount).map(
+          const processedFallback = Object.entries(desaCount).map(
             ([desa, count]) => {
               const nd = normalizeDesaName(desa);
               const kec = (publicDesaKecMap && publicDesaKecMap[nd]) ? String(publicDesaKecMap[nd]).trim() : '';
@@ -1328,14 +1328,76 @@ const DesaTaggingDashboard = () => {
                 desa,
                 count,
                 percentage: percentMu != null ? percentMu.toFixed(2) : ((count / rows.length) * 100).toFixed(2),
-                percentageMU: percentMu, // raw number (not fixed) for display
+                percentageMU: percentMu,
                 muatan: denom || 0,
                 kecamatan: kec || ''
               };
             }
           );
-          setOriginalData(processedData);
-          sortData(processedData, "desc");
+
+          // Build ID-matched counts with exact muatan from daftar-desa.xlsx to avoid name mismatches
+          const processedById = (() => {
+            try {
+              if (!daftarMap || !Object.keys(daftarMap).length) return [];
+              const counts = {};
+              const meta = {};
+              const extractId = (r) => {
+                try {
+                  const keys = Object.keys(r || {});
+                  const vals = keys.map((k) => String(r[k] ?? ""));
+                  const digits = [];
+                  for (const v of vals) {
+                    const ms = v.match(/\[(\d+)\]/g);
+                    if (ms) for (const it of ms) digits.push(it.replace(/[^0-9]/g, ""));
+                  }
+                  for (let i = 0; i < digits.length; i++) {
+                    const a = digits[i] || "";
+                    const b = digits[i + 1] || "";
+                    const c = digits[i + 2] || "";
+                    if (a.length === 4 && b.length === 3 && c.length === 3) {
+                      return `${a}${b}${c}`;
+                    }
+                  }
+                } catch (e) {}
+                return null;
+              };
+              for (const r of rows) {
+                const id10 = extractId(r);
+                if (id10 && daftarMap[id10]) {
+                  counts[id10] = (counts[id10] || 0) + 1;
+                  if (!meta[id10]) {
+                    const rec = daftarMap[id10];
+                    const muKey = findMuatanKeyGeneric(rec);
+                    const muatan = muKey ? parseNumberSmart(rec[muKey]) : null;
+                    meta[id10] = {
+                      desa:
+                        (rec.nama_desa || rec.nama || rec.DESA || rec["Nama Desa"] || rec.desa || "").toString().trim(),
+                      kec:
+                        (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || "").toString().trim(),
+                      muatan: muatan || 0,
+                    };
+                  }
+                }
+              }
+              return Object.entries(counts).map(([id10, count]) => {
+                const m = meta[id10] || {};
+                const denom = m.muatan || 0;
+                const percentMu = denom > 0 ? (count / denom) * 100 : null;
+                return {
+                  desa: m.desa || id10,
+                  count,
+                  percentage: percentMu != null ? percentMu.toFixed(2) : '0.00',
+                  percentageMU: percentMu,
+                  muatan: denom || 0,
+                  kecamatan: m.kec || ''
+                };
+              });
+            } catch (e) { return []; }
+          })();
+
+          const finalData = processedById.length ? processedById : processedFallback;
+          setOriginalData(finalData);
+          sortData(finalData, "desc");
           setPoints(newPoints);
         }
       } catch (err) {
