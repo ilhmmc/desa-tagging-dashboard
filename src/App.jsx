@@ -699,19 +699,67 @@ const DesaTaggingDashboard = () => {
     const byNames = {};
     const byDesa = {};
     if (!map || typeof map !== 'object') return { byNames, byDesa };
-    const toNum = (v) => {
-      if (typeof v === 'number') return v;
-      if (typeof v === 'string') {
-        const cleaned = v.replace(/,/g, '.').replace(/[^0-9+\-.]/g, '');
-        const n = parseFloat(cleaned);
-        return Number.isFinite(n) ? n : null;
+
+    const toNumRobust = (v) => {
+      if (v == null || v === '') return null;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      let s = String(v).trim();
+      // Normalize common thousand/decimal formats
+      // If contains both . and , decide decimal by last separator
+      if (/^[0-9.,\s]+$/.test(s)) {
+        const lastSep = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+        if (lastSep !== -1) {
+          const frac = s.slice(lastSep + 1);
+          // If exactly 3 digits after sep and there are other seps before -> likely thousands, remove all seps
+          if (/^\d{3}$/.test(frac) && /[.,]/.test(s.slice(0, lastSep))) {
+            s = s.replace(/[.,\s]/g, '');
+            const n = parseFloat(s);
+            return Number.isFinite(n) ? n : null;
+          }
+        }
+        // Fallback: treat comma as decimal, remove spaces
+        s = s.replace(/\s+/g, '');
+        if (s.includes(',') && s.includes('.')) {
+          if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+            s = s.replace(/\./g, '').replace(/,/g, '.');
+          } else {
+            s = s.replace(/,/g, '');
+          }
+        } else if (s.includes(',')) {
+          // assume comma decimal
+          s = s.replace(/\./g, '').replace(/,/g, '.');
+        } else {
+          // only dots present
+          const parts = s.split('.');
+          if (parts.length > 2) s = parts.join('');
+        }
+      } else {
+        s = s.replace(/[^0-9+\-.]/g, '');
+      }
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const findMuatanKey = (rec) => {
+      const keys = Object.keys(rec || {});
+      const norm = (k) => k.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const target = 'jumlahmuatanusahawilkerstat';
+      for (const k of keys) {
+        if (norm(k) === target) return k;
+      }
+      // fallback: try contains
+      for (const k of keys) {
+        const nk = norm(k);
+        if (nk.includes('muatan') && nk.includes('usaha') && nk.includes('wilkerstat')) return k;
       }
       return null;
     };
+
     for (const rec of Object.values(map)) {
       const desaName = (rec.nama_desa || rec.desa || rec.DESA || rec['Nama Desa'] || rec.nama || '').toString().trim();
       const kecName = (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim();
-      const muatan = toNum(rec.jumlah_muatan_usaha_wilkerstat);
+      const muKey = findMuatanKey(rec);
+      const muatan = muKey ? toNumRobust(rec[muKey]) : null;
       if (desaName) {
         const dKey = normalizeDesaName(desaName);
         if (muatan != null) byDesa[dKey] = muatan;
