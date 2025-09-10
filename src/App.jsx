@@ -1600,6 +1600,11 @@ const DesaTaggingDashboard = () => {
         }
         if (Object.keys(map).length) {
           setDaftarDesaMap(map);
+          try {
+            const idx = buildMuatanIndexes(map);
+            setMuatanByNames(idx.byNames);
+            setMuatanByDesa(idx.byDesa);
+          } catch(e) {}
           alert("Daftar-desa berhasil dimuat dan siap untuk koreksi.");
         } else {
           alert(
