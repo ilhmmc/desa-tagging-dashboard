@@ -1003,8 +1003,14 @@ const DesaTaggingDashboard = () => {
 
         // Load authoritative daftar-desa mapping if present
         const daftarMap = await tryLoadDaftarDesa();
-        if (daftarMap && Object.keys(daftarMap).length)
+        if (daftarMap && Object.keys(daftarMap).length) {
           setDaftarDesaMap(daftarMap);
+          try {
+            const idx = buildMuatanIndexes(daftarMap);
+            setMuatanByNames(idx.byNames);
+            setMuatanByDesa(idx.byDesa);
+          } catch(e) {}
+        }
 
         // Excel: try public
         const excelRes = await tryLoadExcelPublic(daftarMap);
