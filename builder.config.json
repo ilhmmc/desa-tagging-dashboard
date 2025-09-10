@@ -1,5 +1,5 @@
 {
-  "command": "npm run dev",
+  "command": "npm start",
   "serverUrl": "httl://localhost:3000",
   "authenticateProxy": false,
   "commitMode": "commits"
