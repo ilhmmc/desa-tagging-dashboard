@@ -1666,7 +1666,7 @@ const DesaTaggingDashboard = () => {
           return out;
         })();
 
-        const processedData = Object.entries(desaCount).map(
+        const processedFallback = Object.entries(desaCount).map(
           ([desa, count]) => {
             const nd = normalizeDesaName(desa);
             const kec = kecMapForPercent[nd] ? String(kecMapForPercent[nd]).trim() : '';
@@ -1683,6 +1683,45 @@ const DesaTaggingDashboard = () => {
             };
           }
         );
+
+        const processedById = (() => {
+          try {
+            if (!daftarDesaMap || !Object.keys(daftarDesaMap).length) return [];
+            const counts = {};
+            const meta = {};
+            for (const r of rows) {
+              const id10 = extractIdFromRow(r);
+              if (id10 && daftarDesaMap[id10]) {
+                counts[id10] = (counts[id10] || 0) + 1;
+                if (!meta[id10]) {
+                  const rec = daftarDesaMap[id10];
+                  const muKey = findMuatanKeyGeneric(rec);
+                  const muatan = muKey ? parseNumberSmart(rec[muKey]) : null;
+                  meta[id10] = {
+                    desa: (rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa || '').toString().trim(),
+                    kec: (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim(),
+                    muatan: muatan || 0,
+                  };
+                }
+              }
+            }
+            return Object.entries(counts).map(([id10, count]) => {
+              const m = meta[id10] || {};
+              const denom = m.muatan || 0;
+              const percentMu = denom > 0 ? (count / denom) * 100 : null;
+              return {
+                desa: m.desa || id10,
+                count,
+                percentage: percentMu != null ? percentMu.toFixed(2) : '0.00',
+                percentageMU: percentMu,
+                muatan: denom || 0,
+                kecamatan: m.kec || ''
+              };
+            });
+          } catch (e) { return []; }
+        })();
+
+        const processedData = processedById.length ? processedById : processedFallback;
 
         // Update master desa list dari file upload
         try {
