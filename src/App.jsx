@@ -2680,20 +2680,6 @@ const DesaTaggingDashboard = () => {
                 </ResponsiveContainer>
               </div>
 
-              {/* Distribusi Persentase */}
-              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
-                <h2 className="mb-4 text-xl font-semibold text-gray-800">Distribusi Persentase (desa)</h2>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={distData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="bin" />
-                    <YAxis />
-                    <Tooltip formatter={(v)=>[`${v} desa`, 'Frekuensi']} />
-                    <Bar dataKey="count" fill="#10B981" radius={[4,4,0,0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
               {/* Rata-rata per Kecamatan */}
               <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
                 <div className="flex items-center justify-between mb-2">
