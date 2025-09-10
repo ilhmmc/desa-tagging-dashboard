@@ -455,8 +455,8 @@ const CanvasChoroplethMap = ({
             {geoLoading
               ? "Memuat..."
               : geojson
-              ? "Segarkan Batas"
-              : "Muat Batas Kecamatan"}
+                ? "Segarkan Batas"
+                : "Muat Batas Kecamatan"}
           </button>
         </div>
         <div className="px-2 py-1 text-xs text-gray-600 bg-white border rounded shadow">
@@ -690,7 +690,7 @@ const DesaTaggingDashboard = () => {
   const normalizeGeneralName = (val) => {
     if (!val && val !== 0) return "";
     let s = val.toString().trim();
-    try { s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); } catch(e) {}
+    try { s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); } catch (e) { }
     s = s.replace(/[^0-9a-zA-Z\s]/g, " ");
     s = s.replace(/\s+/g, " ").trim().toLowerCase();
     return s;
@@ -891,7 +891,7 @@ const DesaTaggingDashboard = () => {
         const rows = (jsonData || []).filter(isRowKabupatenNganjuk);
         try {
           if (rows && rows.length) setRawRows(rows);
-        } catch (e) {}
+        } catch (e) { }
         // Build desa -> kecamatan mapping using object keys (case-insensitive), avoid picking email columns
         const desaKecMap = {};
         if (rows && rows.length) {
@@ -964,11 +964,11 @@ const DesaTaggingDashboard = () => {
                 let kab = candKab
                   ? getBracketDigits(r[candKab])
                   : getBracketDigits(r["Kabupaten"]) ||
-                    getBracketDigits(r["KABUPATEN"]);
+                  getBracketDigits(r["KABUPATEN"]);
                 let kec = candKec
                   ? getBracketDigits(r[candKec])
                   : getBracketDigits(r["Kecamatan"]) ||
-                    getBracketDigits(r["KECAMATAN"]);
+                  getBracketDigits(r["KECAMATAN"]);
                 let desa = candDesa
                   ? getBracketDigits(r[candDesa])
                   : getBracketDigits(r["Desa"]) || getBracketDigits(r["DESA"]);
@@ -1003,7 +1003,7 @@ const DesaTaggingDashboard = () => {
                   desa = desa.padStart(3, "0").slice(-3);
                   return `${kab}${kec}${desa}`;
                 }
-              } catch (e) {}
+              } catch (e) { }
               return null;
             };
 
@@ -1037,21 +1037,21 @@ const DesaTaggingDashboard = () => {
             const desaNameRaw = desaKey
               ? row[desaKey]
               : row["Nama Desa"] ||
-                row["DESA"] ||
-                row["Desa"] ||
-                row["desa"] ||
-                row["nama_desa"] ||
-                row["nama"] ||
-                row["NAMA"];
+              row["DESA"] ||
+              row["Desa"] ||
+              row["desa"] ||
+              row["nama_desa"] ||
+              row["nama"] ||
+              row["NAMA"];
             const kecRaw = kecKey
               ? row[kecKey]
               : row["Kecamatan"] ||
-                row["KECAMATAN"] ||
-                row["kecamatan"] ||
-                row["Nama Kecamatan"] ||
-                row["nama kecamatan"] ||
-                row["Kec"] ||
-                row["kec"];
+              row["KECAMATAN"] ||
+              row["kecamatan"] ||
+              row["Nama Kecamatan"] ||
+              row["nama kecamatan"] ||
+              row["Kec"] ||
+              row["kec"];
             const desaName = desaNameRaw ? String(desaNameRaw).trim() : "";
             const kec = kecRaw != null ? String(kecRaw).trim() : "";
             if (!desaName) continue;
@@ -1106,7 +1106,7 @@ const DesaTaggingDashboard = () => {
             const idx = buildMuatanIndexes(daftarMap);
             setMuatanByNames(idx.byNames);
             setMuatanByDesa(idx.byDesa);
-          } catch(e) {}
+          } catch (e) { }
         }
 
         // Excel: try public
@@ -1118,7 +1118,7 @@ const DesaTaggingDashboard = () => {
         const rows = (jsonData || []).filter(isRowKabupatenNganjuk);
         try {
           if (rows && rows.length) setRawRows(rows);
-        } catch (e) {}
+        } catch (e) { }
         if (!cancelled && rows && rows.length) {
           // Build master desa list from Excel if possible
           try {
@@ -1357,7 +1357,7 @@ const DesaTaggingDashboard = () => {
                     const c = digits[i + 2] || "";
                     if (a.length === 4 && b.length === 3 && c.length === 3) return `${a}${b}${c}`;
                   }
-                } catch (e) {}
+                } catch (e) { }
                 return null;
               };
 
@@ -1452,7 +1452,7 @@ const DesaTaggingDashboard = () => {
         const rows = (jsonData || []).filter(isRowKabupatenNganjuk);
         try {
           if (rows && rows.length) setRawRows(rows);
-        } catch (e) {}
+        } catch (e) { }
 
         // Proses data untuk mendapatkan jumlah tagging per desa dan kumpulkan titik koordinat
         const desaCount = {};
@@ -1525,11 +1525,11 @@ const DesaTaggingDashboard = () => {
             let kab = candKab
               ? getBracketDigits(r[candKab])
               : getBracketDigits(r["Kabupaten"]) ||
-                getBracketDigits(r["KABUPATEN"]);
+              getBracketDigits(r["KABUPATEN"]);
             let kec = candKec
               ? getBracketDigits(r[candKec])
               : getBracketDigits(r["Kecamatan"]) ||
-                getBracketDigits(r["KECAMATAN"]);
+              getBracketDigits(r["KECAMATAN"]);
             let desa = candDesa
               ? getBracketDigits(r[candDesa])
               : getBracketDigits(r["Desa"]) || getBracketDigits(r["DESA"]);
@@ -1563,7 +1563,7 @@ const DesaTaggingDashboard = () => {
               desa = desa.padStart(3, "0").slice(-3);
               return `${kab}${kec}${desa}`;
             }
-          } catch (e) {}
+          } catch (e) { }
           return null;
         };
 
@@ -1585,20 +1585,20 @@ const DesaTaggingDashboard = () => {
               const rec = daftarDesaMap[id10];
               desa =
                 rec.nama_desa ||
-                rec.nama ||
-                rec.DESA ||
-                rec["Nama Desa"] ||
-                rec.desa
+                  rec.nama ||
+                  rec.DESA ||
+                  rec["Nama Desa"] ||
+                  rec.desa
                   ? String(
-                      rec.nama_desa ||
-                        rec.nama ||
-                        rec.DESA ||
-                        rec["Nama Desa"] ||
-                        rec.desa
-                    ).trim()
+                    rec.nama_desa ||
+                    rec.nama ||
+                    rec.DESA ||
+                    rec["Nama Desa"] ||
+                    rec.desa
+                  ).trim()
                   : desa;
             }
-          } catch (e) {}
+          } catch (e) { }
 
           if (desa && desa !== "") {
             desaCount[desa] = (desaCount[desa] || 0) + 1;
@@ -1778,7 +1778,7 @@ const DesaTaggingDashboard = () => {
             if (name) names.add(String(name).trim());
           }
           if (names.size) setMasterDesaList(Array.from(names).sort());
-        } catch (e) {}
+        } catch (e) { }
 
         // Bangun peta desa->kecamatan dari file upload dan gabungkan
         try {
@@ -1826,7 +1826,7 @@ const DesaTaggingDashboard = () => {
           }
           if (Object.keys(desaKecNew).length)
             setDesaToKecMap((prev) => ({ ...prev, ...desaKecNew }));
-        } catch (e) {}
+        } catch (e) { }
 
         setOriginalData(processedData);
         sortData(processedData, "desc");
@@ -1882,7 +1882,7 @@ const DesaTaggingDashboard = () => {
             const idx = buildMuatanIndexes(map);
             setMuatanByNames(idx.byNames);
             setMuatanByDesa(idx.byDesa);
-          } catch(e) {}
+          } catch (e) { }
           alert("Daftar-desa berhasil dimuat dan siap untuk koreksi.");
         } else {
           alert(
@@ -1925,6 +1925,10 @@ const DesaTaggingDashboard = () => {
   const filteredData = data.filter((item) =>
     item.desa.toLowerCase().includes(filterText.toLowerCase())
   );
+  // Khusus Top 20 Desa: urutkan berdasarkan jumlah entri (count)
+  const topByCount = useMemo(() => {
+    return [...filteredData].sort((a, b) => (b.count || 0) - (a.count || 0));
+  }, [filteredData]);
 
   // Export data ke Excel — aggregate by Kecamatan + Desa using rawRows values when available
   const exportToExcel = () => {
@@ -1980,7 +1984,7 @@ const DesaTaggingDashboard = () => {
 
     for (const row of filteredRows) {
       // Prioritize reading order: Kabupaten -> Kecamatan -> Desa
-      const kabCandidates = ['kabupaten','kabupaten/kota','kab','nama kabupaten','kabupaten_kota'];
+      const kabCandidates = ['kabupaten', 'kabupaten/kota', 'kab', 'nama kabupaten', 'kabupaten_kota'];
       const kabKey = findKey(row, kabCandidates);
       // if kab not present or not Nganjuk, skip (defensive)
       if (!kabKey && !isRowKabupatenNganjuk(row)) continue;
@@ -2002,7 +2006,7 @@ const DesaTaggingDashboard = () => {
       if ((!finalKec || finalKec === '') || (!finalDesa || finalDesa === '')) {
         if (daftarDesaMap && typeof daftarDesaMap === 'object') {
           try {
-            const id10 = (function(r){
+            const id10 = (function (r) {
               try {
                 const keys = Object.keys(r || {});
                 const lower = keys.reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
@@ -2020,15 +2024,15 @@ const DesaTaggingDashboard = () => {
                     const ms = v.match(/\[(\d+)\]/g);
                     if (ms) for (const item of ms) { bracketDigits.push(item.replace(/[^0-9]/g, '')); }
                   }
-                  for (let i=0;i<bracketDigits.length;i++) {
+                  for (let i = 0; i < bracketDigits.length; i++) {
                     const a = bracketDigits[i] || '';
-                    const b = bracketDigits[i+1] || '';
-                    const c = bracketDigits[i+2] || '';
-                    if (a.length===4 && b.length===3 && c.length===3) { kab = kab || a; kec = kec || b; desa = desa || c; break; }
+                    const b = bracketDigits[i + 1] || '';
+                    const c = bracketDigits[i + 2] || '';
+                    if (a.length === 4 && b.length === 3 && c.length === 3) { kab = kab || a; kec = kec || b; desa = desa || c; break; }
                   }
                 }
-                if (kab && kec && desa) { kab = kab.padStart(4,'0').slice(-4); kec = kec.padStart(3,'0').slice(-3); desa = desa.padStart(3,'0').slice(-3); return `${kab}${kec}${desa}`; }
-              } catch(e){}
+                if (kab && kec && desa) { kab = kab.padStart(4, '0').slice(-4); kec = kec.padStart(3, '0').slice(-3); desa = desa.padStart(3, '0').slice(-3); return `${kab}${kec}${desa}`; }
+              } catch (e) { }
               return null;
             })(row);
             if (id10 && daftarDesaMap[id10]) {
@@ -2036,7 +2040,7 @@ const DesaTaggingDashboard = () => {
               if ((!finalDesa || finalDesa === '') && (rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa)) finalDesa = toStr(rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa);
               if ((!finalKec || finalKec === '') && (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama)) finalKec = toStr(rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama);
             }
-          } catch(e){}
+          } catch (e) { }
         }
       }
 
@@ -2066,7 +2070,7 @@ const DesaTaggingDashboard = () => {
           const c = digits[i + 2] || "";
           if (a.length === 4 && b.length === 3 && c.length === 3) return `${a}${b}${c}`;
         }
-      } catch (e) {}
+      } catch (e) { }
       return null;
     };
 
@@ -2098,36 +2102,36 @@ const DesaTaggingDashboard = () => {
     // Build ordered rows: use ID-based if available, else fallback to name-based pairCounts
     const rows = (Object.keys(idCounts).length
       ? Object.entries(idCounts).map(([id10, cnt]) => {
-          const meta = idMeta[id10] || { kec: '', desa: '', muatan: 0 };
-          const denom = meta.muatan || 0;
-          const pct = denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '0.00';
-          return {
-            'Nama Kecamatan': meta.kec,
-            'Nama Desa': meta.desa || id10,
-            'Jumlah Tagging': cnt,
-            'Jumlah Muatan Usaha Wilkerstat': denom,
-            'Persentase (%)': pct
-          };
-        })
+        const meta = idMeta[id10] || { kec: '', desa: '', muatan: 0 };
+        const denom = meta.muatan || 0;
+        const pct = denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '0.00';
+        return {
+          'Nama Kecamatan': meta.kec,
+          'Nama Desa': meta.desa || id10,
+          'Jumlah Tagging': cnt,
+          'Jumlah Muatan Usaha Wilkerstat': denom,
+          'Persentase (%)': pct
+        };
+      })
       : Object.entries(pairCounts).map(([pairKey, cnt]) => {
-          const sample = pairSample[pairKey] || { kec: '', desa: '' };
-          const nk = normalizeGeneralName(sample.kec || '');
-          const nd = normalizeDesaName(sample.desa || '');
-          const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
-          const pct = denom && denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '0.00';
-          return {
-            'Nama Kecamatan': sample.kec || '',
-            'Nama Desa': sample.desa || '',
-            'Jumlah Tagging': cnt,
-            'Jumlah Muatan Usaha Wilkerstat': denom || 0,
-            'Persentase (%)': pct
-          };
-        })
+        const sample = pairSample[pairKey] || { kec: '', desa: '' };
+        const nk = normalizeGeneralName(sample.kec || '');
+        const nd = normalizeDesaName(sample.desa || '');
+        const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
+        const pct = denom && denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '0.00';
+        return {
+          'Nama Kecamatan': sample.kec || '',
+          'Nama Desa': sample.desa || '',
+          'Jumlah Tagging': cnt,
+          'Jumlah Muatan Usaha Wilkerstat': denom || 0,
+          'Persentase (%)': pct
+        };
+      })
     );
 
     // Tambahkan desa yang belum ditagging dari daftar-desa.xlsx
     if (daftarDesaMap && Object.keys(daftarDesaMap).length) {
-      const presentNameKeys = new Set(rows.map(r => `${normalizeGeneralName(r['Nama Kecamatan']||'')}|||${normalizeDesaName(r['Nama Desa']||'')}`));
+      const presentNameKeys = new Set(rows.map(r => `${normalizeGeneralName(r['Nama Kecamatan'] || '')}|||${normalizeDesaName(r['Nama Desa'] || '')}`));
       for (const rec of Object.values(daftarDesaMap)) {
         const desaNm = (rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa || '').toString().trim();
         const kecNm = (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim();
@@ -2161,7 +2165,7 @@ const DesaTaggingDashboard = () => {
 
     const wb = XLSX.utils.book_new();
     // Use AoA to preserve column order
-    const header = ['Ranking','Nama Kecamatan','Nama Desa','Jumlah Tagging','Jumlah Muatan Usaha Wilkerstat','Persentase (%)'];
+    const header = ['Ranking', 'Nama Kecamatan', 'Nama Desa', 'Jumlah Tagging', 'Jumlah Muatan Usaha Wilkerstat', 'Persentase (%)'];
     const sheetData = [header, ...ordered.map(r => header.map(h => r[h]))];
     const ws1 = XLSX.utils.aoa_to_sheet(sheetData);
     XLSX.utils.book_append_sheet(wb, ws1, 'Data Tagging per Desa');
@@ -2215,11 +2219,11 @@ const DesaTaggingDashboard = () => {
         let kab = candKab
           ? getBracketDigits(r[candKab])
           : getBracketDigits(r["Kabupaten"]) ||
-            getBracketDigits(r["KABUPATEN"]);
+          getBracketDigits(r["KABUPATEN"]);
         let kec = candKec
           ? getBracketDigits(r[candKec])
           : getBracketDigits(r["Kecamatan"]) ||
-            getBracketDigits(r["KECAMATAN"]);
+          getBracketDigits(r["KECAMATAN"]);
         let desa = candDesa
           ? getBracketDigits(r[candDesa])
           : getBracketDigits(r["Desa"]) || getBracketDigits(r["DESA"]);
@@ -2253,7 +2257,7 @@ const DesaTaggingDashboard = () => {
           desa = desa.padStart(3, "0").slice(-3);
           return `${kab}${kec}${desa}`;
         }
-      } catch (e) {}
+      } catch (e) { }
       return null;
     };
 
@@ -2269,7 +2273,7 @@ const DesaTaggingDashboard = () => {
           if (rec.nama_desa) copied.Desa = String(rec.nama_desa);
           else if (rec.nama) copied.Desa = String(rec.nama);
         }
-      } catch (e) {}
+      } catch (e) { }
       out.push(copied);
     }
 
@@ -2369,28 +2373,28 @@ const DesaTaggingDashboard = () => {
     if (typeof it?.percentage === 'number') return it.percentage;
     return 0;
   };
-  const percents = data.map(getPercent).filter((v)=>Number.isFinite(v));
-  const avgPct = percents.length ? percents.reduce((a,b)=>a+b,0)/percents.length : 0;
-  const medianPct = (()=>{
+  const percents = data.map(getPercent).filter((v) => Number.isFinite(v));
+  const avgPct = percents.length ? percents.reduce((a, b) => a + b, 0) / percents.length : 0;
+  const medianPct = (() => {
     if (!percents.length) return 0;
-    const s = [...percents].sort((a,b)=>a-b);
-    const m = Math.floor(s.length/2);
-    return s.length % 2 ? s[m] : (s[m-1]+s[m])/2;
+    const s = [...percents].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
   })();
-  const over100Count = percents.filter(p=>p>=100).length;
-  const zeroCount = data.filter(d=>d.count===0).length;
-  const binsEdge = [0,25,50,75,100,125,150];
-  const distData = (()=>{
-    const bins = binsEdge.map((from,i)=>({bin: i<binsEdge.length-1?`${from}-${binsEdge[i+1]}`:`${from}+`, from, to: binsEdge[i+1]??Infinity, count:0}));
-    for (const p of percents){
-      let placed=false;
-      for (let i=0;i<bins.length;i++){
-        const b=bins[i];
-        if ((p>=b.from) && (p<(b.to===Infinity?Infinity:b.to))){ bins[i].count++; placed=true; break; }
+  const over100Count = percents.filter(p => p >= 100).length;
+  const zeroCount = data.filter(d => d.count === 0).length;
+  const binsEdge = [0, 25, 50, 75, 100, 125, 150];
+  const distData = (() => {
+    const bins = binsEdge.map((from, i) => ({ bin: i < binsEdge.length - 1 ? `${from}-${binsEdge[i + 1]}` : `${from}+`, from, to: binsEdge[i + 1] ?? Infinity, count: 0 }));
+    for (const p of percents) {
+      let placed = false;
+      for (let i = 0; i < bins.length; i++) {
+        const b = bins[i];
+        if ((p >= b.from) && (p < (b.to === Infinity ? Infinity : b.to))) { bins[i].count++; placed = true; break; }
       }
-      if (!placed) bins[bins.length-1].count++;
+      if (!placed) bins[bins.length - 1].count++;
     }
-    return bins.map(({bin,count})=>({bin,count}));
+    return bins.map(({ bin, count }) => ({ bin, count }));
   })();
 
   const filteredPoints = useMemo(() => {
@@ -2574,11 +2578,10 @@ const DesaTaggingDashboard = () => {
                     onClick={() =>
                       handleSortChange(sortOrder === "desc" ? "asc" : "desc")
                     }
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                      sortOrder === "desc"
+                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${sortOrder === "desc"
                         ? "bg-blue-600 text-white hover:bg-blue-700"
                         : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                    }`}
+                      }`}
                   >
                     {sortOrder === "desc" ? (
                       <SortDesc size={16} />
@@ -2663,14 +2666,13 @@ const DesaTaggingDashboard = () => {
               {/* Chart */}
               <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-gray-800">Top 20 Desa</h2>
+                  <h2 className="text-xl font-semibold text-gray-800">Top 20 Desa (berdasarkan jumlah entri)</h2>
                   <div className="flex items-center space-x-2">
                     <button onClick={() => setChartExpanded(true)} className="px-3 py-1 text-sm bg-white border rounded shadow">Expand Chart</button>
-                    <button onClick={exportToExcel} className="px-3 py-1 text-white bg-green-600 rounded shadow">Export</button>
                   </div>
                 </div>
                 <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={filteredData.slice(0, 20)} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                  <BarChart data={topByCount.slice(0, 20)} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="desa" angle={-45} textAnchor="end" height={80} fontSize={10} />
                     <YAxis />
@@ -2691,8 +2693,8 @@ const DesaTaggingDashboard = () => {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="kecamatan" angle={-45} textAnchor="end" height={80} />
                     <YAxis />
-                    <Tooltip formatter={(v)=>[`${Number(v).toFixed(1)}%`, 'Rata-rata %']} />
-                    <Bar dataKey="avgPct" fill="#6366F1" radius={[4,4,0,0]} />
+                    <Tooltip formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Rata-rata %']} />
+                    <Bar dataKey="avgPct" fill="#6366F1" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
                 <p className="mt-2 text-xs text-gray-500">Menampilkan 20 kecamatan teratas berdasarkan rata-rata persentase desa. Nilai >100% dimungkinkan.</p>
@@ -2794,7 +2796,7 @@ const DesaTaggingDashboard = () => {
                   <div className="h-full p-4">
                     <div style={{ height: "100%", width: "100%" }}>
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={filteredData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                        <BarChart data={topByCount} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis dataKey="desa" angle={-45} textAnchor="end" height={80} fontSize={12} />
                           <YAxis />
