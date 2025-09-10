@@ -622,6 +622,8 @@ const DesaTaggingDashboard = () => {
   const [masterDesaList, setMasterDesaList] = useState([]);
   const [desaToKecMap, setDesaToKecMap] = useState({});
   const [daftarDesaMap, setDaftarDesaMap] = useState({});
+  const [muatanByNames, setMuatanByNames] = useState({}); // key: normKec+"|||"+normDesa -> muatan number
+  const [muatanByDesa, setMuatanByDesa] = useState({});  // key: normDesa -> muatan number (fallback)
   const [mapExpanded, setMapExpanded] = useState(false);
   const [rawRows, setRawRows] = useState([]);
 
@@ -683,6 +685,142 @@ const DesaTaggingDashboard = () => {
     return s;
   };
   const [chartExpanded, setChartExpanded] = useState(false);
+  const [kecChartExpanded, setKecChartExpanded] = useState(false);
+
+  const normalizeGeneralName = (val) => {
+    if (!val && val !== 0) return "";
+    let s = val.toString().trim();
+    try { s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); } catch(e) {}
+    s = s.replace(/[^0-9a-zA-Z\s]/g, " ");
+    s = s.replace(/\s+/g, " ").trim().toLowerCase();
+    return s;
+  };
+
+  // Robust numeric parser for values like 1.201, 1,201, 1 201, or 1201
+  const parseNumberSmart = (v) => {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    let s = String(v).trim();
+    if (/^[0-9.,\s]+$/.test(s)) {
+      const lastSep = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+      if (lastSep !== -1) {
+        const frac = s.slice(lastSep + 1);
+        if (/^\d{3}$/.test(frac) && /[.,]/.test(s.slice(0, lastSep))) {
+          s = s.replace(/[.,\s]/g, '');
+          const n = parseFloat(s);
+          return Number.isFinite(n) ? n : null;
+        }
+      }
+      s = s.replace(/\s+/g, '');
+      if (s.includes(',') && s.includes('.')) {
+        if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+          s = s.replace(/\./g, '').replace(/,/g, '.');
+        } else {
+          s = s.replace(/,/g, '');
+        }
+      } else if (s.includes(',')) {
+        s = s.replace(/\./g, '').replace(/,/g, '.');
+      } else {
+        const parts = s.split('.');
+        if (parts.length > 2) s = parts.join('');
+      }
+    } else {
+      s = s.replace(/[^0-9+\-.]/g, '');
+    }
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Find the muatan column (case-insensitive, punctuation-insensitive)
+  const findMuatanKeyGeneric = (rec) => {
+    const keys = Object.keys(rec || {});
+    const norm = (k) => k.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const target = 'jumlahmuatanusahawilkerstat';
+    for (const k of keys) if (norm(k) === target) return k;
+    for (const k of keys) {
+      const nk = norm(k);
+      if (nk.includes('muatan') && nk.includes('usaha') && nk.includes('wilkerstat')) return k;
+    }
+    return null;
+  };
+
+  const buildMuatanIndexes = (map) => {
+    const byNames = {};
+    const byDesa = {};
+    if (!map || typeof map !== 'object') return { byNames, byDesa };
+
+    const toNumRobust = (v) => {
+      if (v == null || v === '') return null;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      let s = String(v).trim();
+      // Normalize common thousand/decimal formats
+      // If contains both . and , decide decimal by last separator
+      if (/^[0-9.,\s]+$/.test(s)) {
+        const lastSep = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+        if (lastSep !== -1) {
+          const frac = s.slice(lastSep + 1);
+          // If exactly 3 digits after sep and there are other seps before -> likely thousands, remove all seps
+          if (/^\d{3}$/.test(frac) && /[.,]/.test(s.slice(0, lastSep))) {
+            s = s.replace(/[.,\s]/g, '');
+            const n = parseFloat(s);
+            return Number.isFinite(n) ? n : null;
+          }
+        }
+        // Fallback: treat comma as decimal, remove spaces
+        s = s.replace(/\s+/g, '');
+        if (s.includes(',') && s.includes('.')) {
+          if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+            s = s.replace(/\./g, '').replace(/,/g, '.');
+          } else {
+            s = s.replace(/,/g, '');
+          }
+        } else if (s.includes(',')) {
+          // assume comma decimal
+          s = s.replace(/\./g, '').replace(/,/g, '.');
+        } else {
+          // only dots present
+          const parts = s.split('.');
+          if (parts.length > 2) s = parts.join('');
+        }
+      } else {
+        s = s.replace(/[^0-9+\-.]/g, '');
+      }
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const findMuatanKey = (rec) => {
+      const keys = Object.keys(rec || {});
+      const norm = (k) => k.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const target = 'jumlahmuatanusahawilkerstat';
+      for (const k of keys) {
+        if (norm(k) === target) return k;
+      }
+      // fallback: try contains
+      for (const k of keys) {
+        const nk = norm(k);
+        if (nk.includes('muatan') && nk.includes('usaha') && nk.includes('wilkerstat')) return k;
+      }
+      return null;
+    };
+
+    for (const rec of Object.values(map)) {
+      const desaName = (rec.nama_desa || rec.desa || rec.DESA || rec['Nama Desa'] || rec.nama || '').toString().trim();
+      const kecName = (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim();
+      const muKey = findMuatanKey(rec);
+      const muatan = muKey ? toNumRobust(rec[muKey]) : null;
+      if (desaName) {
+        const dKey = normalizeDesaName(desaName);
+        if (muatan != null) byDesa[dKey] = muatan;
+        if (kecName) {
+          const kKey = normalizeGeneralName(kecName);
+          const nameKey = `${kKey}|||${dKey}`;
+          if (muatan != null) byNames[nameKey] = muatan;
+        }
+      }
+    }
+    return { byNames, byDesa };
+  };
 
   // Auto-load default GeoJSON and Excel from public/ if available; fallback to remote fetch for geojson
   useEffect(() => {
@@ -962,8 +1100,14 @@ const DesaTaggingDashboard = () => {
 
         // Load authoritative daftar-desa mapping if present
         const daftarMap = await tryLoadDaftarDesa();
-        if (daftarMap && Object.keys(daftarMap).length)
+        if (daftarMap && Object.keys(daftarMap).length) {
           setDaftarDesaMap(daftarMap);
+          try {
+            const idx = buildMuatanIndexes(daftarMap);
+            setMuatanByNames(idx.byNames);
+            setMuatanByDesa(idx.byDesa);
+          } catch(e) {}
+        }
 
         // Excel: try public
         const excelRes = await tryLoadExcelPublic(daftarMap);
@@ -1174,15 +1318,105 @@ const DesaTaggingDashboard = () => {
               });
             }
           });
-          const processedData = Object.entries(desaCount).map(
-            ([desa, count]) => ({
-              desa,
-              count,
-              percentage: ((count / rows.length) * 100).toFixed(2),
-            })
+          const processedFallback = Object.entries(desaCount).map(
+            ([desa, count]) => {
+              const nd = normalizeDesaName(desa);
+              const kec = (publicDesaKecMap && publicDesaKecMap[nd]) ? String(publicDesaKecMap[nd]).trim() : '';
+              const nk = normalizeGeneralName(kec);
+              const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
+              const percentMu = denom && denom > 0 ? ((count / denom) * 100) : null;
+              return {
+                desa,
+                count,
+                percentage: percentMu != null ? percentMu.toFixed(2) : ((count / rows.length) * 100).toFixed(2),
+                percentageMU: percentMu,
+                muatan: denom || 0,
+                kecamatan: kec || ''
+              };
+            }
           );
-          setOriginalData(processedData);
-          sortData(processedData, "desc");
+
+          // Build ID-matched counts with exact muatan from daftar-desa.xlsx to avoid name mismatches
+          const processedById = (() => {
+            try {
+              if (!daftarMap || !Object.keys(daftarMap).length) return [];
+              const counts = {};
+              const meta = {};
+              const extractId = (r) => {
+                try {
+                  const keys = Object.keys(r || {});
+                  const vals = keys.map((k) => String(r[k] ?? ""));
+                  const digits = [];
+                  for (const v of vals) {
+                    const ms = v.match(/\[(\d+)\]/g);
+                    if (ms) for (const it of ms) digits.push(it.replace(/[^0-9]/g, ""));
+                  }
+                  for (let i = 0; i < digits.length; i++) {
+                    const a = digits[i] || "";
+                    const b = digits[i + 1] || "";
+                    const c = digits[i + 2] || "";
+                    if (a.length === 4 && b.length === 3 && c.length === 3) return `${a}${b}${c}`;
+                  }
+                } catch (e) {}
+                return null;
+              };
+
+              for (const r of rows) {
+                const id10 = extractId(r);
+                if (id10 && daftarMap[id10]) {
+                  counts[id10] = (counts[id10] || 0) + 1;
+                  if (!meta[id10]) {
+                    const rec = daftarMap[id10];
+                    const muKey = findMuatanKeyGeneric(rec);
+                    const muatan = muKey ? parseNumberSmart(rec[muKey]) : null;
+                    meta[id10] = {
+                      desa: (rec.nama_desa || rec.nama || rec.DESA || rec["Nama Desa"] || rec.desa || "").toString().trim(),
+                      kec: (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || "").toString().trim(),
+                      muatan: muatan || 0,
+                    };
+                  }
+                }
+              }
+
+              const presentIds = new Set(Object.keys(counts));
+              const out = Object.entries(counts).map(([id10, count]) => {
+                const m = meta[id10] || {};
+                const denom = m.muatan || 0;
+                const percentMu = denom > 0 ? (count / denom) * 100 : 0;
+                return {
+                  desa: m.desa || id10,
+                  count,
+                  percentage: percentMu.toFixed(2),
+                  percentageMU: percentMu,
+                  muatan: denom || 0,
+                  kecamatan: m.kec || ''
+                };
+              });
+
+              // Tambahkan desa yang belum ditagging (count = 0) dari daftar-desa.xlsx
+              for (const [id10, rec] of Object.entries(daftarMap)) {
+                if (presentIds.has(id10)) continue;
+                const muKey = findMuatanKeyGeneric(rec);
+                const muatan = muKey ? parseNumberSmart(rec[muKey]) : 0;
+                out.push({
+                  desa: (rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa || '').toString().trim() || id10,
+                  count: 0,
+                  percentage: '0.00',
+                  percentageMU: 0,
+                  muatan: muatan || 0,
+                  kecamatan: (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim(),
+                });
+              }
+
+              // Urutkan agar yang 0 ada di paling bawah
+              out.sort((a, b) => b.count - a.count);
+              return out;
+            } catch (e) { return []; }
+          })();
+
+          const finalData = processedById.length ? processedById : processedFallback;
+          setOriginalData(finalData);
+          sortData(finalData, "desc");
           setPoints(newPoints);
         }
       } catch (err) {
@@ -1419,13 +1653,114 @@ const DesaTaggingDashboard = () => {
         });
 
         // Konversi ke array dan urutkan
-        const processedData = Object.entries(desaCount).map(
-          ([desa, count]) => ({
-            desa,
-            count,
-            percentage: ((count / rows.length) * 100).toFixed(2),
-          })
+        // Build a quick desa->kecamatan map from uploaded rows for percentage matching
+        const kecMapForPercent = (() => {
+          const out = {};
+          const kecCandidates = [
+            "kecamatan",
+            "nama kecamatan",
+            "kec",
+            "nm_kecamatan",
+            "nama_kec",
+            "Nama Kecamatan",
+            "KECAMATAN",
+            "Kecamatan"
+          ];
+          const findKey2 = (obj, candidates) => {
+            const keys = Object.keys(obj || {});
+            const lowerMap = keys.reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
+            for (const cand of candidates) { const k = lowerMap[cand.toLowerCase()]; if (k) return k; }
+            return null;
+          };
+          for (const r of rows) {
+            const desaNameRaw = r.Desa || r.desa || r.nama_desa || r.nama || r.NAMA || r.nm_desa || r.name || r["Nama Desa"];
+            const desaName = desaNameRaw ? String(desaNameRaw).trim() : "";
+            const kecKey = findKey2(r, kecCandidates);
+            const kecRaw = kecKey ? r[kecKey] : undefined;
+            const kec = kecRaw != null ? String(kecRaw).trim() : "";
+            if (!desaName || !kec || kec.includes("@")) continue;
+            const key = normalizeDesaName(desaName);
+            if (!out[key]) out[key] = kec;
+          }
+          return out;
+        })();
+
+        const processedFallback = Object.entries(desaCount).map(
+          ([desa, count]) => {
+            const nd = normalizeDesaName(desa);
+            const kec = kecMapForPercent[nd] ? String(kecMapForPercent[nd]).trim() : '';
+            const nk = normalizeGeneralName(kec);
+            const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
+            const percentMu = denom && denom > 0 ? ((count / denom) * 100) : null;
+            return {
+              desa,
+              count,
+              percentage: percentMu != null ? percentMu.toFixed(2) : ((count / rows.length) * 100).toFixed(2),
+              percentageMU: percentMu,
+              muatan: denom || 0,
+              kecamatan: kec || ''
+            };
+          }
         );
+
+        const processedById = (() => {
+          try {
+            if (!daftarDesaMap || !Object.keys(daftarDesaMap).length) return [];
+            const counts = {};
+            const meta = {};
+            for (const r of rows) {
+              const id10 = extractIdFromRow(r);
+              if (id10 && daftarDesaMap[id10]) {
+                counts[id10] = (counts[id10] || 0) + 1;
+                if (!meta[id10]) {
+                  const rec = daftarDesaMap[id10];
+                  const muKey = findMuatanKeyGeneric(rec);
+                  const muatan = muKey ? parseNumberSmart(rec[muKey]) : null;
+                  meta[id10] = {
+                    desa: (rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa || '').toString().trim(),
+                    kec: (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim(),
+                    muatan: muatan || 0,
+                  };
+                }
+              }
+            }
+
+            const presentIds = new Set(Object.keys(counts));
+            const out = Object.entries(counts).map(([id10, count]) => {
+              const m = meta[id10] || {};
+              const denom = m.muatan || 0;
+              const percentMu = denom > 0 ? (count / denom) * 100 : 0;
+              return {
+                desa: m.desa || id10,
+                count,
+                percentage: percentMu.toFixed(2),
+                percentageMU: percentMu,
+                muatan: denom || 0,
+                kecamatan: m.kec || ''
+              };
+            });
+
+            // Tambahkan desa yang belum ditagging (count = 0) dari daftar-desa.xlsx
+            for (const [id10, rec] of Object.entries(daftarDesaMap)) {
+              if (presentIds.has(id10)) continue;
+              const muKey = findMuatanKeyGeneric(rec);
+              const muatan = muKey ? parseNumberSmart(rec[muKey]) : 0;
+              out.push({
+                desa: (rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa || '').toString().trim() || id10,
+                count: 0,
+                percentage: '0.00',
+                percentageMU: 0,
+                muatan: muatan || 0,
+                kecamatan: (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim(),
+              });
+            }
+
+            out.sort((a, b) => b.count - a.count);
+            return out;
+          } catch (e) { return []; }
+        })();
+
+        const processedData = processedById.length ? processedById : processedFallback;
 
         // Update master desa list dari file upload
         try {
@@ -1543,6 +1878,11 @@ const DesaTaggingDashboard = () => {
         }
         if (Object.keys(map).length) {
           setDaftarDesaMap(map);
+          try {
+            const idx = buildMuatanIndexes(map);
+            setMuatanByNames(idx.byNames);
+            setMuatanByDesa(idx.byDesa);
+          } catch(e) {}
           alert("Daftar-desa berhasil dimuat dan siap untuk koreksi.");
         } else {
           alert(
@@ -1561,12 +1901,16 @@ const DesaTaggingDashboard = () => {
 
   // Fungsi sorting data
   const sortData = (dataToSort, order) => {
+    const pct = (x) => {
+      const p = typeof x.percentageMU === 'number' && isFinite(x.percentageMU)
+        ? x.percentageMU
+        : (typeof x.percentage === 'string' ? parseFloat(x.percentage) : (x.percentage || 0));
+      return Number.isFinite(p) ? p : 0;
+    };
     const sorted = [...dataToSort].sort((a, b) => {
-      if (order === "desc") {
-        return b.count - a.count;
-      } else {
-        return a.count - b.count;
-      }
+      const pa = pct(a);
+      const pb = pct(b);
+      return order === 'desc' ? pb - pa : pa - pb;
     });
     setData(sorted);
   };
@@ -1706,40 +2050,121 @@ const DesaTaggingDashboard = () => {
       if (!pairSample[pairKey]) pairSample[pairKey] = { kec: finalKec || '', desa: finalDesa || '' };
     }
 
-    // Build ordered rows from pairCounts
-    const rows = Object.entries(pairCounts).map(([pairKey, cnt]) => {
-      const sample = pairSample[pairKey] || { kec: '', desa: '' };
-      return {
-        'Nama Kecamatan': sample.kec || '',
-        'Nama Desa': sample.desa || '',
-        'Jumlah Tagging': cnt,
-        'Persentase (%)': total ? ((cnt / total) * 100).toFixed(2) : '0.00'
-      };
-    });
+    // Prefer ID-based aggregation using daftar-desa.xlsx to ensure exact matching
+    const extractId = (r) => {
+      try {
+        const keys = Object.keys(r || {});
+        const vals = keys.map((k) => String(r[k] ?? ""));
+        const digits = [];
+        for (const v of vals) {
+          const ms = v.match(/\[(\d+)\]/g);
+          if (ms) for (const it of ms) digits.push(it.replace(/[^0-9]/g, ""));
+        }
+        for (let i = 0; i < digits.length; i++) {
+          const a = digits[i] || "";
+          const b = digits[i + 1] || "";
+          const c = digits[i + 2] || "";
+          if (a.length === 4 && b.length === 3 && c.length === 3) return `${a}${b}${c}`;
+        }
+      } catch (e) {}
+      return null;
+    };
 
-    // Sort rows by count desc
-    rows.sort((a, b) => b['Jumlah Tagging'] - a['Jumlah Tagging']);
+    const idCounts = {};
+    const idMeta = {};
+    if (daftarDesaMap && Object.keys(daftarDesaMap).length) {
+      for (const r of filteredRows) {
+        const id10 = extractId(r);
+        if (id10 && daftarDesaMap[id10]) {
+          idCounts[id10] = (idCounts[id10] || 0) + 1;
+          if (!idMeta[id10]) {
+            const rec = daftarDesaMap[id10];
+            const muKey = findMuatanKeyGeneric(rec);
+            const muatan = muKey ? parseNumberSmart(rec[muKey]) : null;
+            idMeta[id10] = {
+              kec: String(
+                rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || ''
+              ).trim(),
+              desa: String(
+                rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa || ''
+              ).trim(),
+              muatan: muatan || 0,
+            };
+          }
+        }
+      }
+    }
 
-    // Ensure desired column order: Ranking, Nama Kecamatan, Nama Desa, Jumlah Tagging, Persentase (%)
+    // Build ordered rows: use ID-based if available, else fallback to name-based pairCounts
+    const rows = (Object.keys(idCounts).length
+      ? Object.entries(idCounts).map(([id10, cnt]) => {
+          const meta = idMeta[id10] || { kec: '', desa: '', muatan: 0 };
+          const denom = meta.muatan || 0;
+          const pct = denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '0.00';
+          return {
+            'Nama Kecamatan': meta.kec,
+            'Nama Desa': meta.desa || id10,
+            'Jumlah Tagging': cnt,
+            'Jumlah Muatan Usaha Wilkerstat': denom,
+            'Persentase (%)': pct
+          };
+        })
+      : Object.entries(pairCounts).map(([pairKey, cnt]) => {
+          const sample = pairSample[pairKey] || { kec: '', desa: '' };
+          const nk = normalizeGeneralName(sample.kec || '');
+          const nd = normalizeDesaName(sample.desa || '');
+          const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
+          const pct = denom && denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '0.00';
+          return {
+            'Nama Kecamatan': sample.kec || '',
+            'Nama Desa': sample.desa || '',
+            'Jumlah Tagging': cnt,
+            'Jumlah Muatan Usaha Wilkerstat': denom || 0,
+            'Persentase (%)': pct
+          };
+        })
+    );
+
+    // Tambahkan desa yang belum ditagging dari daftar-desa.xlsx
+    if (daftarDesaMap && Object.keys(daftarDesaMap).length) {
+      const presentNameKeys = new Set(rows.map(r => `${normalizeGeneralName(r['Nama Kecamatan']||'')}|||${normalizeDesaName(r['Nama Desa']||'')}`));
+      for (const rec of Object.values(daftarDesaMap)) {
+        const desaNm = (rec.nama_desa || rec.nama || rec.DESA || rec['Nama Desa'] || rec.desa || '').toString().trim();
+        const kecNm = (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim();
+        const key = `${normalizeGeneralName(kecNm)}|||${normalizeDesaName(desaNm)}`;
+        if (!presentNameKeys.has(key)) {
+          const muKey = findMuatanKeyGeneric(rec);
+          const muatan = muKey ? parseNumberSmart(rec[muKey]) : 0;
+          rows.push({
+            'Nama Kecamatan': kecNm,
+            'Nama Desa': desaNm,
+            'Jumlah Tagging': 0,
+            'Jumlah Muatan Usaha Wilkerstat': muatan || 0,
+            'Persentase (%)': '0.00'
+          });
+        }
+      }
+    }
+
+    // Sort rows by percentage desc (allow >100%)
+    rows.sort((a, b) => parseFloat(b['Persentase (%)'] || 0) - parseFloat(a['Persentase (%)'] || 0));
+
+    // Ensure desired column order: Ranking, Nama Kecamatan, Nama Desa, Jumlah Tagging, Jumlah Muatan Usaha Wilkerstat, Persentase (%)
     const ordered = rows.map((r, idx) => ({
       Ranking: idx + 1,
       'Nama Kecamatan': r['Nama Kecamatan'],
       'Nama Desa': r['Nama Desa'],
       'Jumlah Tagging': r['Jumlah Tagging'],
+      'Jumlah Muatan Usaha Wilkerstat': r['Jumlah Muatan Usaha Wilkerstat'],
       'Persentase (%)': r['Persentase (%)']
     }));
 
     const wb = XLSX.utils.book_new();
     // Use AoA to preserve column order
-    const header = ['Ranking','Nama Kecamatan','Nama Desa','Jumlah Tagging','Persentase (%)'];
+    const header = ['Ranking','Nama Kecamatan','Nama Desa','Jumlah Tagging','Jumlah Muatan Usaha Wilkerstat','Persentase (%)'];
     const sheetData = [header, ...ordered.map(r => header.map(h => r[h]))];
     const ws1 = XLSX.utils.aoa_to_sheet(sheetData);
     XLSX.utils.book_append_sheet(wb, ws1, 'Data Tagging per Desa');
-
-    // Also create a sheet for desa with zero tagging (none expected since we aggregated from rawRows)
-    const zeroRows = ordered.filter(r => r['Jumlah Tagging'] === 0).map(r => [r['Ranking'], r['Nama Kecamatan'], r['Nama Desa'], r['Jumlah Tagging']]);
-    const ws2 = XLSX.utils.aoa_to_sheet([['Ranking','Nama Kecamatan','Nama Desa','Jumlah Tagging'], ...zeroRows]);
-    XLSX.utils.book_append_sheet(wb, ws2, 'Belum Ditagging');
 
     XLSX.writeFile(wb, 'sebaran_tagging_desa.xlsx');
   };
@@ -1901,8 +2326,11 @@ const DesaTaggingDashboard = () => {
   };
 
   // Komponen Progress Bar
-  const ProgressBar = ({ value, max, label, count }) => {
-    const percentage = (value / max) * 100;
+  const ProgressBar = ({ value, max, label, count, percentMU }) => {
+    const rawPct = (typeof percentMU === 'number' && isFinite(percentMU))
+      ? percentMU
+      : (max > 0 ? (value / max) * 100 : 0);
+    const pctText = `${rawPct.toFixed(1)}%`;
     return (
       <div className="p-4 mb-4 bg-white border border-gray-200 rounded-lg shadow">
         <div className="flex items-center justify-between mb-2">
@@ -1914,20 +2342,14 @@ const DesaTaggingDashboard = () => {
               {count.toLocaleString()}
             </span>
             <span className="text-xs text-gray-500">
-              (
-              {(
-                (value /
-                  originalData.reduce((sum, item) => sum + item.count, 0)) *
-                100
-              ).toFixed(1)}
-              %)
+              ({pctText})
             </span>
           </div>
         </div>
-        <div className="w-full h-3 bg-gray-200 rounded-full">
+        <div className="w-full h-3 overflow-visible bg-gray-200 rounded-full">
           <div
             className="h-3 transition-all duration-300 ease-out rounded-full bg-gradient-to-r from-blue-500 to-blue-600"
-            style={{ width: `${percentage}%` }}
+            style={{ width: `${rawPct}%` }}
           ></div>
         </div>
       </div>
@@ -1936,6 +2358,41 @@ const DesaTaggingDashboard = () => {
 
   const maxCount =
     data.length > 0 ? Math.max(...data.map((item) => item.count)) : 0;
+
+  // Persentase utilities (raw, can exceed 100%)
+  const getPercent = (it) => {
+    if (typeof it?.percentageMU === 'number' && isFinite(it.percentageMU)) return it.percentageMU;
+    if (typeof it?.percentage === 'string') {
+      const n = parseFloat(it.percentage);
+      return Number.isFinite(n) ? n : 0;
+    }
+    if (typeof it?.percentage === 'number') return it.percentage;
+    return 0;
+  };
+  const percents = data.map(getPercent).filter((v)=>Number.isFinite(v));
+  const avgPct = percents.length ? percents.reduce((a,b)=>a+b,0)/percents.length : 0;
+  const medianPct = (()=>{
+    if (!percents.length) return 0;
+    const s = [...percents].sort((a,b)=>a-b);
+    const m = Math.floor(s.length/2);
+    return s.length % 2 ? s[m] : (s[m-1]+s[m])/2;
+  })();
+  const over100Count = percents.filter(p=>p>=100).length;
+  const zeroCount = data.filter(d=>d.count===0).length;
+  const binsEdge = [0,25,50,75,100,125,150];
+  const distData = (()=>{
+    const bins = binsEdge.map((from,i)=>({bin: i<binsEdge.length-1?`${from}-${binsEdge[i+1]}`:`${from}+`, from, to: binsEdge[i+1]??Infinity, count:0}));
+    for (const p of percents){
+      let placed=false;
+      for (let i=0;i<bins.length;i++){
+        const b=bins[i];
+        if ((p>=b.from) && (p<(b.to===Infinity?Infinity:b.to))){ bins[i].count++; placed=true; break; }
+      }
+      if (!placed) bins[bins.length-1].count++;
+    }
+    return bins.map(({bin,count})=>({bin,count}));
+  })();
+
   const filteredPoints = useMemo(() => {
     if (!filterText) return points;
     return points.filter((p) =>
@@ -1944,6 +2401,30 @@ const DesaTaggingDashboard = () => {
   }, [points, filterText]);
 
   const totalData = originalData.reduce((sum, item) => sum + item.count, 0);
+
+  // Rata-rata persentase per kecamatan (raw, bisa >100%)
+  const kecAverages = useMemo(() => {
+    const agg = {};
+    for (const it of data) {
+      const k = (it.kecamatan || '').toString().trim();
+      if (!k) continue;
+      const p = getPercent(it);
+      if (!agg[k]) agg[k] = { sumPct: 0, n: 0, totalTag: 0, totalMu: 0 };
+      agg[k].sumPct += Number.isFinite(p) ? p : 0;
+      agg[k].n += 1;
+      agg[k].totalTag += it.count || 0;
+      agg[k].totalMu += it.muatan || 0;
+    }
+    const out = Object.entries(agg).map(([k, v]) => ({
+      kecamatan: k,
+      avgPct: v.n ? v.sumPct / v.n : 0,
+      desa: v.n,
+      totalTag: v.totalTag,
+      totalMu: v.totalMu,
+    }));
+    out.sort((a, b) => b.avgPct - a.avgPct);
+    return out;
+  }, [data]);
 
   return (
     <div className="min-h-screen p-6 bg-gray-50">
@@ -2126,47 +2607,44 @@ const DesaTaggingDashboard = () => {
             </div>
 
             {/* Summary Stats */}
-            <div className="grid grid-cols-1 gap-6 mb-6 md:grid-cols-4">
+            <div className="grid grid-cols-1 gap-6 mb-6 md:grid-cols-6">
               <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
-                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">
-                  Total Desa
-                </h3>
-                <p className="text-2xl font-bold text-blue-600">
-                  {data.length}
-                </p>
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Total Desa</h3>
+                <p className="text-2xl font-bold text-blue-600">{Object.keys(daftarDesaMap || {}).length || data.length}</p>
               </div>
               <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
-                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">
-                  Total Entri
-                </h3>
-                <p className="text-2xl font-bold text-green-600">
-                  {totalData.toLocaleString()}
-                </p>
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Total Entri</h3>
+                <p className="text-2xl font-bold text-green-600">{totalData.toLocaleString()}</p>
               </div>
               <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
-                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">
-                  Rata-rata per Desa
-                </h3>
-                <p className="text-2xl font-bold text-purple-600">
-                  {Math.round(totalData / data.length)}
-                </p>
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Rata-rata per Desa</h3>
+                <p className="text-2xl font-bold text-purple-600">{Math.round(totalData / ((Object.keys(daftarDesaMap || {}).length || data.length) || 1))}</p>
               </div>
               <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
-                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">
-                  Tertinggi
-                </h3>
-                <p className="text-2xl font-bold text-red-600">
-                  {maxCount.toLocaleString()}
-                </p>
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Tertinggi</h3>
+                <p className="text-2xl font-bold text-red-600">{maxCount.toLocaleString()}</p>
               </div>
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Median Cakupan (%)</h3>
+                <p className="text-2xl font-bold text-emerald-600">{medianPct.toFixed(1)}%</p>
+              </div>
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <h3 className="text-sm font-medium tracking-wide text-gray-500 uppercase">Desa ≥ 100%</h3>
+                <p className="text-2xl font-bold text-amber-600">{over100Count}</p>
+              </div>
+            </div>
+
+            {/* Insight */}
+            <div className="p-4 mb-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+              <h3 className="mb-1 text-sm font-semibold text-gray-800">Insight singkat</h3>
+              <p className="text-sm text-gray-600">Median {medianPct.toFixed(1)}%, rata-rata {avgPct.toFixed(1)}%, {over100Count} desa ≥100%, {zeroCount} desa 0%.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               {/* Progress Bars */}
               <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
                 <h2 className="mb-4 text-xl font-semibold text-gray-800">
-                  Progress per Desa ({filteredData.length} dari {data.length}{" "}
-                  desa)
+                  {(() => { const total = Object.keys(daftarDesaMap || {}).length || data.length; const done = data.filter(d => d.count > 0).length; return `Progress per Desa (${done} dari ${total} desa)`; })()}
                 </h2>
                 <div className="overflow-y-auto max-h-96">
                   {filteredData.map((item, index) => (
@@ -2176,6 +2654,7 @@ const DesaTaggingDashboard = () => {
                       max={maxCount}
                       label={`${index + 1}. ${item.desa}`}
                       count={item.count}
+                      percentMU={item.percentageMU}
                     />
                   ))}
                 </div>
@@ -2184,48 +2663,38 @@ const DesaTaggingDashboard = () => {
               {/* Chart */}
               <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-gray-800">
-                    Top 20 Desa
-                  </h2>
+                  <h2 className="text-xl font-semibold text-gray-800">Top 20 Desa</h2>
                   <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => setChartExpanded(true)}
-                      className="px-3 py-1 text-sm bg-white border rounded shadow"
-                    >
-                      Expand Chart
-                    </button>
-                    <button
-                      onClick={exportToExcel}
-                      className="px-3 py-1 text-white bg-green-600 rounded shadow"
-                    >
-                      Export
-                    </button>
+                    <button onClick={() => setChartExpanded(true)} className="px-3 py-1 text-sm bg-white border rounded shadow">Expand Chart</button>
                   </div>
                 </div>
                 <ResponsiveContainer width="100%" height={400}>
-                  <BarChart
-                    data={filteredData.slice(0, 20)}
-                    margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
-                  >
+                  <BarChart data={filteredData.slice(0, 20)} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="desa"
-                      angle={-45}
-                      textAnchor="end"
-                      height={80}
-                      fontSize={10}
-                    />
+                    <XAxis dataKey="desa" angle={-45} textAnchor="end" height={80} fontSize={10} />
                     <YAxis />
-                    <Tooltip
-                      formatter={(value, name) => [
-                        `${value.toLocaleString()} entri`,
-                        "Jumlah Tagging",
-                      ]}
-                      labelStyle={{ color: "#374151" }}
-                    />
+                    <Tooltip formatter={(value) => [`${value.toLocaleString()} entri`, "Jumlah Tagging"]} labelStyle={{ color: "#374151" }} />
                     <Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+
+              {/* Rata-rata per Kecamatan */}
+              <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-xl font-semibold text-gray-800">Rata-rata per Kecamatan (Cakupan %)</h2>
+                  <button onClick={() => setKecChartExpanded(true)} className="px-3 py-1 text-sm bg-white border rounded shadow">Expand Chart</button>
+                </div>
+                <ResponsiveContainer width="100%" height={360}>
+                  <BarChart data={kecAverages.slice(0, 20)} margin={{ top: 10, right: 20, left: 10, bottom: 60 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="kecamatan" angle={-45} textAnchor="end" height={80} />
+                    <YAxis />
+                    <Tooltip formatter={(v)=>[`${Number(v).toFixed(1)}%`, 'Rata-rata %']} />
+                    <Bar dataKey="avgPct" fill="#6366F1" radius={[4,4,0,0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <p className="mt-2 text-xs text-gray-500">Menampilkan 20 kecamatan teratas berdasarkan rata-rata persentase desa. Nilai >100% dimungkinkan.</p>
               </div>
 
               {/* Map */}
@@ -2316,45 +2785,46 @@ const DesaTaggingDashboard = () => {
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                 <div className="bg-white w-[90vw] h-[90vh] rounded shadow-lg overflow-hidden">
                   <div className="flex items-center justify-between p-3 border-b">
-                    <div className="font-semibold">
-                      Chart Top Desa (Expanded)
-                    </div>
+                    <div className="font-semibold">Chart Top Desa (Expanded)</div>
                     <div className="space-x-2">
-                      <button
-                        onClick={() => setChartExpanded(false)}
-                        className="px-3 py-1 bg-white border rounded"
-                      >
-                        Close
-                      </button>
+                      <button onClick={() => setChartExpanded(false)} className="px-3 py-1 bg-white border rounded">Close</button>
                     </div>
                   </div>
                   <div className="h-full p-4">
                     <div style={{ height: "100%", width: "100%" }}>
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={filteredData}
-                          margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
-                        >
+                        <BarChart data={filteredData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                           <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis
-                            dataKey="desa"
-                            angle={-45}
-                            textAnchor="end"
-                            height={80}
-                            fontSize={12}
-                          />
+                          <XAxis dataKey="desa" angle={-45} textAnchor="end" height={80} fontSize={12} />
                           <YAxis />
-                          <Tooltip
-                            formatter={(value) => [
-                              `${value.toLocaleString()} entri`,
-                              "Jumlah Tagging",
-                            ]}
-                          />
-                          <Bar
-                            dataKey="count"
-                            fill="#3B82F6"
-                            radius={[4, 4, 0, 0]}
-                          />
+                          <Tooltip formatter={(value) => [`${value.toLocaleString()} entri`, "Jumlah Tagging"]} />
+                          <Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {kecChartExpanded && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="bg-white w-[90vw] h-[90vh] rounded shadow-lg overflow-hidden">
+                  <div className="flex items-center justify-between p-3 border-b">
+                    <div className="font-semibold">Rata-rata per Kecamatan (Expanded)</div>
+                    <div className="space-x-2">
+                      <button onClick={() => setKecChartExpanded(false)} className="px-3 py-1 bg-white border rounded">Close</button>
+                    </div>
+                  </div>
+                  <div className="h-full p-4">
+                    <div style={{ height: "100%", width: "100%" }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={kecAverages} margin={{ top: 20, right: 30, left: 20, bottom: 80 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="kecamatan" angle={-45} textAnchor="end" height={100} fontSize={12} />
+                          <YAxis />
+                          <Tooltip formatter={(value) => [`${Number(value).toFixed(1)}%`, 'Rata-rata %']} />
+                          <Bar dataKey="avgPct" fill="#6366F1" radius={[4, 4, 0, 0]} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
