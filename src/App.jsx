@@ -1477,11 +1477,21 @@ const DesaTaggingDashboard = () => {
 
         // Konversi ke array dan urutkan
         const processedData = Object.entries(desaCount).map(
-          ([desa, count]) => ({
-            desa,
-            count,
-            percentage: ((count / rows.length) * 100).toFixed(2),
-          })
+          ([desa, count]) => {
+            const nd = normalizeDesaName(desa);
+            const kec = desaToKecMap[nd] ? String(desaToKecMap[nd]).trim() : '';
+            const nk = normalizeGeneralName(kec);
+            const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
+            const percentMu = denom && denom > 0 ? ((count / denom) * 100) : null;
+            return {
+              desa,
+              count,
+              percentage: percentMu != null ? percentMu.toFixed(2) : ((count / rows.length) * 100).toFixed(2),
+              percentageMU: percentMu,
+              muatan: denom || 0,
+              kecamatan: kec || ''
+            };
+          }
         );
 
         // Update master desa list dari file upload
