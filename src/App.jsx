@@ -622,6 +622,8 @@ const DesaTaggingDashboard = () => {
   const [masterDesaList, setMasterDesaList] = useState([]);
   const [desaToKecMap, setDesaToKecMap] = useState({});
   const [daftarDesaMap, setDaftarDesaMap] = useState({});
+  const [muatanByNames, setMuatanByNames] = useState({}); // key: normKec+"|||"+normDesa -> muatan number
+  const [muatanByDesa, setMuatanByDesa] = useState({});  // key: normDesa -> muatan number (fallback)
   const [mapExpanded, setMapExpanded] = useState(false);
   const [rawRows, setRawRows] = useState([]);
 
