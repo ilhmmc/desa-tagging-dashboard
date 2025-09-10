@@ -1781,11 +1781,15 @@ const DesaTaggingDashboard = () => {
     // Build ordered rows from pairCounts
     const rows = Object.entries(pairCounts).map(([pairKey, cnt]) => {
       const sample = pairSample[pairKey] || { kec: '', desa: '' };
+      const nk = normalizeGeneralName(sample.kec || '');
+      const nd = normalizeDesaName(sample.desa || '');
+      const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
+      const pct = denom && denom > 0 ? ((cnt / denom) * 100).toFixed(2) : '';
       return {
         'Nama Kecamatan': sample.kec || '',
         'Nama Desa': sample.desa || '',
         'Jumlah Tagging': cnt,
-        'Persentase (%)': total ? ((cnt / total) * 100).toFixed(2) : '0.00'
+        'Persentase (%)': pct
       };
     });
 
