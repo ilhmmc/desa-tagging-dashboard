@@ -1476,10 +1476,42 @@ const DesaTaggingDashboard = () => {
         });
 
         // Konversi ke array dan urutkan
+        // Build a quick desa->kecamatan map from uploaded rows for percentage matching
+        const kecMapForPercent = (() => {
+          const out = {};
+          const kecCandidates = [
+            "kecamatan",
+            "nama kecamatan",
+            "kec",
+            "nm_kecamatan",
+            "nama_kec",
+            "Nama Kecamatan",
+            "KECAMATAN",
+            "Kecamatan"
+          ];
+          const findKey2 = (obj, candidates) => {
+            const keys = Object.keys(obj || {});
+            const lowerMap = keys.reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
+            for (const cand of candidates) { const k = lowerMap[cand.toLowerCase()]; if (k) return k; }
+            return null;
+          };
+          for (const r of rows) {
+            const desaNameRaw = r.Desa || r.desa || r.nama_desa || r.nama || r.NAMA || r.nm_desa || r.name || r["Nama Desa"];
+            const desaName = desaNameRaw ? String(desaNameRaw).trim() : "";
+            const kecKey = findKey2(r, kecCandidates);
+            const kecRaw = kecKey ? r[kecKey] : undefined;
+            const kec = kecRaw != null ? String(kecRaw).trim() : "";
+            if (!desaName || !kec || kec.includes("@")) continue;
+            const key = normalizeDesaName(desaName);
+            if (!out[key]) out[key] = kec;
+          }
+          return out;
+        })();
+
         const processedData = Object.entries(desaCount).map(
           ([desa, count]) => {
             const nd = normalizeDesaName(desa);
-            const kec = desaToKecMap[nd] ? String(desaToKecMap[nd]).trim() : '';
+            const kec = kecMapForPercent[nd] ? String(kecMapForPercent[nd]).trim() : '';
             const nk = normalizeGeneralName(kec);
             const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
             const percentMu = denom && denom > 0 ? ((count / denom) * 100) : null;
