@@ -686,6 +686,45 @@ const DesaTaggingDashboard = () => {
   };
   const [chartExpanded, setChartExpanded] = useState(false);
 
+  const normalizeGeneralName = (val) => {
+    if (!val && val !== 0) return "";
+    let s = val.toString().trim();
+    try { s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); } catch(e) {}
+    s = s.replace(/[^0-9a-zA-Z\s]/g, " ");
+    s = s.replace(/\s+/g, " ").trim().toLowerCase();
+    return s;
+  };
+
+  const buildMuatanIndexes = (map) => {
+    const byNames = {};
+    const byDesa = {};
+    if (!map || typeof map !== 'object') return { byNames, byDesa };
+    const toNum = (v) => {
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const cleaned = v.replace(/,/g, '.').replace(/[^0-9+\-.]/g, '');
+        const n = parseFloat(cleaned);
+        return Number.isFinite(n) ? n : null;
+      }
+      return null;
+    };
+    for (const rec of Object.values(map)) {
+      const desaName = (rec.nama_desa || rec.desa || rec.DESA || rec['Nama Desa'] || rec.nama || '').toString().trim();
+      const kecName = (rec.nama_kecamatan || rec.kecamatan || rec.kec || rec.kecamatan_name || rec.kecamatan_nama || '').toString().trim();
+      const muatan = toNum(rec.jumlah_muatan_usaha_wilkerstat);
+      if (desaName) {
+        const dKey = normalizeDesaName(desaName);
+        if (muatan != null) byDesa[dKey] = muatan;
+        if (kecName) {
+          const kKey = normalizeGeneralName(kecName);
+          const nameKey = `${kKey}|||${dKey}`;
+          if (muatan != null) byNames[nameKey] = muatan;
+        }
+      }
+    }
+    return { byNames, byDesa };
+  };
+
   // Auto-load default GeoJSON and Excel from public/ if available; fallback to remote fetch for geojson
   useEffect(() => {
     let cancelled = false;
