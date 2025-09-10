@@ -1224,7 +1224,7 @@ const DesaTaggingDashboard = () => {
           const processedData = Object.entries(desaCount).map(
             ([desa, count]) => {
               const nd = normalizeDesaName(desa);
-              const kec = desaToKecMap[nd] ? String(desaToKecMap[nd]).trim() : '';
+              const kec = (publicDesaKecMap && publicDesaKecMap[nd]) ? String(publicDesaKecMap[nd]).trim() : '';
               const nk = normalizeGeneralName(kec);
               const denom = (muatanByNames[`${nk}|||${nd}`] ?? muatanByDesa[nd] ?? null);
               const percentMu = denom && denom > 0 ? ((count / denom) * 100) : null;
